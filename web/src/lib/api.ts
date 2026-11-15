@@ -16,6 +16,11 @@ export type DueReviews = z.output<typeof c.DueReviews>;
 export type ReviewResult = z.output<typeof c.ReviewResult>;
 export type Leaderboard = z.output<typeof c.Leaderboard>;
 export type LearningStage = z.output<typeof c.LearningStage>;
+export type PublicUser = z.output<typeof c.PublicUser>;
+export type Curriculum = z.output<typeof c.Curriculum>;
+export type Challenge = z.output<typeof c.Challenge>;
+export type Achievement = z.output<typeof c.Achievement>;
+export type Stats = z.output<typeof c.Stats>;
 
 export class ApiFailure extends Error {
   constructor(
@@ -54,6 +59,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 const get = <T>(path: string) => request<T>("GET", path);
 const post = <T>(path: string, body?: unknown) => request<T>("POST", path, body);
+const forUser = (userId?: string) => (userId ? `?userId=${encodeURIComponent(userId)}` : "");
 
 export const api = {
   meta: () => get<Meta>("/meta"),
@@ -65,7 +71,17 @@ export const api = {
   createWord: (body: z.input<typeof c.CreateWordBody>) => post<WordDetail>("/words", body),
   getWord: (id: string) => get<WordDetail>(`/words/${id}`),
   studyWord: (id: string) => post<WordDetail>(`/words/${id}/study`),
-  introduceWord: (id: string) => post<WordDetail>(`/words/${id}/introduce`),
+  introduceWord: (id: string, userId: string) =>
+    post<WordDetail>(`/words/${id}/introduce`, { userId }),
+  updateWord: (id: string, body: z.input<typeof c.UpdateWordBody>) =>
+    request<WordDetail>("PATCH", `/words/${id}`, body),
+  listUsers: () => get<{ users: PublicUser[] }>("/users"),
+  curriculum: () => get<Curriculum>("/curriculum"),
+  startNextCurriculumWord: () => post<WordDetail>("/curriculum/next"),
+  challenges: () => get<{ challenges: Challenge[] }>("/challenges"),
+  achievements: (userId?: string) =>
+    get<{ achievements: Achievement[] }>(`/achievements${forUser(userId)}`),
+  stats: (userId?: string) => get<Stats>(`/stats${forUser(userId)}`),
   addEncounter: (id: string, body: z.input<typeof c.EncounterInput>) =>
     post<WordDetail>(`/words/${id}/encounters`, body),
   submitSentence: (id: string, body: z.input<typeof c.SubmitSentenceBody>) =>

@@ -11,6 +11,9 @@
   --accent-ink: #fbf7ee;
   --good: #3c6a48;
   --warn: #8f5f12;
+  /* Chart series, validated for colour-blind separation on these surfaces. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -24,6 +27,8 @@
     --accent-ink: #1a1612;
     --good: #93c29e;
     --warn: #dcb46c;
+    --series-1: #3987e5;
+    --series-2: #d95926;
   }
 }
 

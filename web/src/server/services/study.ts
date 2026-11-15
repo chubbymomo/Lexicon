@@ -4,6 +4,7 @@ import type { User } from "@/generated/prisma/client";
 import type { SubmitReviewBody, SubmitSentenceBody } from "../contract";
 import { db } from "../db";
 import { badRequest, conflict, notFound } from "../errors";
+import { settle } from "./competition";
 import { awardXp } from "./progress";
 import {
   blankWord,
@@ -50,7 +51,7 @@ export async function submitSentence(
   const ok = isAccepted(evaluation);
   const now = new Date();
 
-  return db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     const sentence = await tx.sentence.create({
       data: {
         userWordId: userWord.id,
@@ -90,6 +91,8 @@ export async function submitSentence(
       xpAwarded,
     };
   });
+  if (ok) await settle(user.id, now);
+  return result;
 }
 
 export async function dueReviews(user: User, limit: number, now = new Date()) {
@@ -220,5 +223,6 @@ export async function submitReview(
     return xp;
   });
 
+  await settle(user.id, now);
   return { rating, progress: await progressOf(userWord.id), xpAwarded, evaluation };
 }

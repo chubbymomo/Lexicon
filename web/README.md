@@ -9,16 +9,17 @@ Requires Node 22 and Postgres 16.
 ```bash
 cp .env.example .env        # then edit the values
 npm install                 # also generates the database client
-npm run db:migrate          # apply migrations to DATABASE_URL
+npm run db:migrate          # apply migrations and load the curriculum
 npm run dev                 # http://localhost:3000
 ```
 
-Open the app and choose "Create one of the two accounts". Both people use the invite code from `LEXICON_INVITE_CODE`; after two accounts exist, registration closes.
+Open the app and choose "Create an account". Everyone uses the invite code from `LEXICON_INVITE_CODE`. Any number of people can join unless `LEXICON_MAX_USERS` sets a cap.
 
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | Postgres connection string. |
 | `LEXICON_INVITE_CODE` | Shared secret required to create an account. |
+| `LEXICON_MAX_USERS` | Optional cap on the number of accounts. Unlimited when unset. |
 | `ANTHROPIC_API_KEY` | Enables the AI tutor. Without it, entries are written by hand and sentences cannot be evaluated. |
 | `LEXICON_TIMEZONE` | IANA zone (for example `America/New_York`) used for streak days and the weekly leaderboard. Defaults to UTC. |
 
@@ -36,10 +37,11 @@ Tests run the real route handlers against a real database. Only the tutor is rep
 ## How it is organised
 
 - `src/server/contract.ts` declares every endpoint once: path, request and response schemas. Route handlers validate against it, and the OpenAPI document is generated from it.
-- `src/server/services/` holds the logic: `words` (the shared collection), `study` (five sentences and reviews), `scheduling` (FSRS), `progress` (XP, streaks, leaderboard), `tutor` (Claude).
+- `src/server/services/` holds the logic: `words` (the shared collection and the curriculum), `study` (five sentences and reviews), `scheduling` (FSRS), `progress` (XP, streaks, leaderboard), `competition` (challenges, achievements, statistics), `tutor` (Claude).
 - `src/app/api/v1/` are thin route files that connect an endpoint to a service function.
 - `src/app/` and `src/components/` are the web pages. They call the API through `src/lib/api.ts` and use no private server access, so anything the web app can do, another client can do.
 - `prisma/schema.prisma` is the data model.
+- `prisma/curriculum.json` is the shared curriculum (see below).
 
 ## The API contract
 
@@ -49,8 +51,16 @@ Tests run the real route handlers against a real database. Only the tutor is rep
 npm run openapi
 ```
 
+## The curriculum
+
+`prisma/curriculum.json` is an ordered list of words with complete entries. Every player works through it in the same order: the next word is always the first one they have not started, and at most three can be unfinished at once. Words players add themselves sit alongside it in the same collection.
+
+To change it, edit the file (the order of the list is the order of study) and run `npm run db:seed`. Reloading updates entries in place and keeps everyone's progress. Each entry's `morphemes` are `[kind, form, meaning, origin]`; words that share a prefix or root are linked on their study pages.
+
 ## Rules the server enforces
 
+- **Curriculum order.** A curriculum word can only be begun when it is the player's next word, and cannot be introduced to someone else.
+- **Challenges.** Daily and weekly challenges are measured from real activity and pay their XP once per period. The shared weekly challenge scales with the number of players and pays everyone when it is met.
 - **Five sentences.** A word moves from studying to reviewing only when all five sentence slots have been accepted by the tutor. A sentence must be grammatical, use the word correctly, and show its meaning through context.
 - **Scheduling.** Reviews are scheduled by FSRS with a 90% retention target and day-scale intervals. A word is "mastered" once its memory stability reaches 21 days.
 - **No XP for busywork.** XP comes from accepted sentences, completing a word's study, correct reviews and mastery. A review is rejected unless the card is due, so reviewing early earns nothing.

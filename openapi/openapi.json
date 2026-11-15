@@ -3,7 +3,7 @@
   "info": {
     "title": "Lexicon API",
     "version": "1.0.0",
-    "description": "API for Lexicon, a two-person vocabulary learning app. All scheduling, scoring and AI evaluation happen on the server, so every client sees the same state.\n\nAuthenticate with the token returned by `/auth/login` or `/auth/register`. Errors use the `ErrorBody` shape with a stable `code`."
+    "description": "API for Lexicon, a shared vocabulary learning app for a small private group. All scheduling, scoring and AI evaluation happen on the server, so every client sees the same state.\n\nAuthenticate with the token returned by `/auth/login` or `/auth/register`. Errors use the `ErrorBody` shape with a stable `code`."
   },
   "servers": [
     {
@@ -39,8 +39,8 @@
         "tags": [
           "Auth"
         ],
-        "summary": "Create one of the two accounts",
-        "description": "Requires the shared invite code. Fails once two accounts exist.",
+        "summary": "Create an account",
+        "description": "Requires the shared invite code. 403 once the server's account cap is reached.",
         "requestBody": {
           "required": true,
           "content": {
@@ -161,6 +161,42 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/users": {
+      "get": {
+        "operationId": "listUsers",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Every player",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserList"
                 }
               }
             }
@@ -541,7 +577,7 @@
         "tags": [
           "Study"
         ],
-        "summary": "Introduce a word to your partner",
+        "summary": "Introduce a word to another player",
         "description": "Adds it to their study list, credited to you. 409 if they already have it.",
         "parameters": [
           {
@@ -553,6 +589,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntroduceBody"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -560,6 +606,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WordDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -765,13 +821,237 @@
         ]
       }
     },
+    "/curriculum": {
+      "get": {
+        "operationId": "curriculum",
+        "tags": [
+          "Curriculum"
+        ],
+        "summary": "Your place in the shared curriculum",
+        "description": "The curriculum is a fixed, ordered list of words that every player works through in the same order.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Curriculum"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/curriculum/next": {
+      "post": {
+        "operationId": "startNextCurriculumWord",
+        "tags": [
+          "Curriculum"
+        ],
+        "summary": "Begin the next curriculum word",
+        "description": "Adds the next word in order to your study list. 409 if `canStartNext` is false or the curriculum is finished.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WordDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/challenges": {
+      "get": {
+        "operationId": "challenges",
+        "tags": [
+          "Competition"
+        ],
+        "summary": "Today's and this week's challenges",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChallengeList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/achievements": {
+      "get": {
+        "operationId": "achievements",
+        "tags": [
+          "Competition"
+        ],
+        "summary": "Milestones reached and still ahead",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "description": "Another player's id; defaults to you.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AchievementList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/stats": {
+      "get": {
+        "operationId": "stats",
+        "tags": [
+          "Competition"
+        ],
+        "summary": "Progress over time",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "description": "Another player's id; defaults to you.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stats"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/leaderboard": {
       "get": {
         "operationId": "leaderboard",
         "tags": [
           "Competition"
         ],
-        "summary": "Both users' standing",
+        "summary": "Every player's standing",
         "responses": {
           "200": {
             "description": "OK",
@@ -810,6 +1090,67 @@
       }
     },
     "schemas": {
+      "Achievement": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "target": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "progress": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Capped at `target`."
+          },
+          "unlockedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp (UTC)"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "description",
+          "target",
+          "progress",
+          "unlockedAt"
+        ],
+        "additionalProperties": false
+      },
+      "AchievementList": {
+        "type": "object",
+        "properties": {
+          "achievements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Achievement"
+            }
+          }
+        },
+        "required": [
+          "achievements"
+        ],
+        "additionalProperties": false
+      },
       "AuthResponse": {
         "type": "object",
         "properties": {
@@ -824,6 +1165,89 @@
         "required": [
           "token",
           "user"
+        ],
+        "additionalProperties": false
+      },
+      "Challenge": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable identifier of the challenge type."
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "DAILY",
+              "WEEKLY"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "PERSONAL",
+              "SHARED"
+            ],
+            "description": "SHARED challenges count every player's work towards one target."
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "target": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "progress": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Capped at `target`."
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "xp": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "XP awarded on completion."
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp (UTC)"
+          }
+        },
+        "required": [
+          "id",
+          "period",
+          "scope",
+          "title",
+          "description",
+          "target",
+          "progress",
+          "completed",
+          "xp",
+          "endsAt"
+        ],
+        "additionalProperties": false
+      },
+      "ChallengeList": {
+        "type": "object",
+        "properties": {
+          "challenges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Challenge"
+            }
+          }
+        },
+        "required": [
+          "challenges"
         ],
         "additionalProperties": false
       },
@@ -914,6 +1338,93 @@
         "required": [
           "lemma"
         ]
+      },
+      "Curriculum": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Number of words in the curriculum."
+          },
+          "started": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Curriculum words on your list."
+          },
+          "studied": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Curriculum words whose study you finished."
+          },
+          "inProgress": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WordSummary"
+            },
+            "description": "Curriculum words you have started but not finished studying."
+          },
+          "next": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WordSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The next word in order that you have not started; null at the end."
+          },
+          "canStartNext": {
+            "type": "boolean",
+            "description": "False while too many curriculum words are unfinished; finish their five sentences first."
+          },
+          "maxInProgress": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "players": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "user": {
+                  "$ref": "#/components/schemas/PublicUser"
+                },
+                "isMe": {
+                  "type": "boolean"
+                },
+                "studied": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "user",
+                "isMe",
+                "studied"
+              ],
+              "additionalProperties": false
+            },
+            "description": "How far every player has come through the same list."
+          }
+        },
+        "required": [
+          "total",
+          "started",
+          "studied",
+          "inProgress",
+          "next",
+          "canStartNext",
+          "maxInProgress",
+          "players"
+        ],
+        "additionalProperties": false
       },
       "DueReviews": {
         "type": "object",
@@ -1042,6 +1553,18 @@
           "error"
         ],
         "additionalProperties": false
+      },
+      "IntroduceBody": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "description": "The player to introduce the word to."
+          }
+        },
+        "required": [
+          "userId"
+        ]
       },
       "Leaderboard": {
         "type": "object",
@@ -1181,7 +1704,7 @@
         "properties": {
           "registrationOpen": {
             "type": "boolean",
-            "description": "False once both accounts exist."
+            "description": "False once the server's optional account cap has been reached."
           },
           "tutorAvailable": {
             "type": "boolean",
@@ -1698,6 +2221,144 @@
           "other"
         ]
       },
+      "Stats": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "stages": {
+            "type": "object",
+            "properties": {
+              "studying": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "reviewing": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "mastered": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "studying",
+              "reviewing",
+              "mastered"
+            ],
+            "additionalProperties": false
+          },
+          "recallRate": {
+            "description": "Share of reviews in the last 30 days that were recalled (rated Hard or better), 0 to 1. Null with no reviews.",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "weeks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "weekStart": {
+                  "type": "string",
+                  "description": "Monday of the week, YYYY-MM-DD."
+                },
+                "studied": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Words studied by the end of the week (cumulative)."
+                },
+                "mastered": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Words mastered by the end of the week (cumulative)."
+                }
+              },
+              "required": [
+                "weekStart",
+                "studied",
+                "mastered"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The last 12 weeks, oldest first."
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "day": {
+                  "type": "string",
+                  "description": "YYYY-MM-DD."
+                },
+                "reviews": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "recalled": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "xp": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "day",
+                "reviews",
+                "recalled",
+                "xp"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The last 30 days, oldest first."
+          },
+          "forecast": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "day": {
+                  "type": "string"
+                },
+                "due": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "day",
+                "due"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Reviews coming due over the next 14 days; overdue cards count today."
+          }
+        },
+        "required": [
+          "user",
+          "stages",
+          "recallRate",
+          "weeks",
+          "days",
+          "forecast"
+        ],
+        "additionalProperties": false
+      },
       "SubmitReviewBody": {
         "type": "object",
         "properties": {
@@ -1814,6 +2475,21 @@
           }
         }
       },
+      "UserList": {
+        "type": "object",
+        "properties": {
+          "users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicUser"
+            }
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "additionalProperties": false
+      },
       "WordDetail": {
         "type": "object",
         "properties": {
@@ -1838,7 +2514,28 @@
             "maximum": 5
           },
           "addedBy": {
-            "$ref": "#/components/schemas/PublicUser"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicUser"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who added the word; null for words that ship with the curriculum."
+          },
+          "curriculumPosition": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Place in the shared curriculum (1-based); null for words a player added."
           },
           "createdAt": {
             "type": "string",
@@ -1856,15 +2553,25 @@
             ],
             "description": "Null if you have not started this word."
           },
-          "partnerStage": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LearningStage"
+          "others": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "user": {
+                  "$ref": "#/components/schemas/PublicUser"
+                },
+                "stage": {
+                  "$ref": "#/components/schemas/LearningStage"
+                }
               },
-              {
-                "type": "null"
-              }
-            ]
+              "required": [
+                "user",
+                "stage"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The other players who have this word, and how far along they are."
           },
           "pronunciation": {
             "type": [
@@ -1929,9 +2636,10 @@
           "definition",
           "difficulty",
           "addedBy",
+          "curriculumPosition",
           "createdAt",
           "myProgress",
-          "partnerStage",
+          "others",
           "pronunciation",
           "etymology",
           "relatedForms",
@@ -1983,7 +2691,28 @@
             "maximum": 5
           },
           "addedBy": {
-            "$ref": "#/components/schemas/PublicUser"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicUser"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who added the word; null for words that ship with the curriculum."
+          },
+          "curriculumPosition": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Place in the shared curriculum (1-based); null for words a player added."
           },
           "createdAt": {
             "type": "string",
@@ -2001,15 +2730,25 @@
             ],
             "description": "Null if you have not started this word."
           },
-          "partnerStage": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LearningStage"
+          "others": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "user": {
+                  "$ref": "#/components/schemas/PublicUser"
+                },
+                "stage": {
+                  "$ref": "#/components/schemas/LearningStage"
+                }
               },
-              {
-                "type": "null"
-              }
-            ]
+              "required": [
+                "user",
+                "stage"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The other players who have this word, and how far along they are."
           }
         },
         "required": [
@@ -2019,9 +2758,10 @@
           "definition",
           "difficulty",
           "addedBy",
+          "curriculumPosition",
           "createdAt",
           "myProgress",
-          "partnerStage"
+          "others"
         ],
         "additionalProperties": false
       }

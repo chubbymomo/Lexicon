@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { api, type Sentence, type WordDetail } from "@/lib/api";
 import { useResource } from "@/lib/use-resource";
+import { useMe } from "./shell";
 import { Button, dueText, Field, Notice, Section, Stage, TextArea } from "./ui";
 
 const kindLabel = { PREFIX: "prefix", ROOT: "root", SUFFIX: "suffix" } as const;
@@ -13,6 +14,9 @@ function Entry({ word }: { word: WordDetail }) {
   return (
     <>
       <header>
+        {word.curriculumPosition !== null && (
+          <p className="label">Curriculum · word {word.curriculumPosition}</p>
+        )}
         <h1 className="font-display text-6xl font-semibold leading-tight">{word.lemma}</h1>
         <p className="text-soft">
           {word.pronunciation && <span className="mr-3">{word.pronunciation}</span>}
@@ -39,7 +43,8 @@ function Entry({ word }: { word: WordDetail }) {
                     {m.origin && `, ${m.origin}`}
                   </span>{" "}
                   · {m.meaning}
-                  {m.relatedWords.length > 0 && (
+                  {/* Suffixes are shared by too many words to be a useful link. */}
+                  {m.kind !== "SUFFIX" && m.relatedWords.length > 0 && (
                     <span className="block pl-4 text-soft">
                       also in{" "}
                       {m.relatedWords.map((related, i) => (
@@ -231,6 +236,108 @@ function Encounters({ word, onChange }: { word: WordDetail; onChange: () => void
   );
 }
 
+const lines = (text: string) =>
+  text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+const commas = (text: string) =>
+  text
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+/** Correct the shared entry. Everyone sees the change. */
+function EditEntry({ word, onSaved }: { word: WordDetail; onSaved: (word: WordDetail) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = Object.fromEntries(new FormData(event.currentTarget)) as Record<string, string>;
+    setBusy(true);
+    setError(null);
+    try {
+      onSaved(
+        await api.updateWord(word.id, {
+          definition: form.definition,
+          pronunciation: form.pronunciation,
+          partOfSpeech: form.partOfSpeech,
+          etymology: form.etymology,
+          examples: lines(form.examples),
+          relatedForms: commas(form.relatedForms),
+          synonyms: commas(form.synonyms),
+          antonyms: commas(form.antonyms),
+        }),
+      );
+      setOpen(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <details className="mt-10" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="label cursor-pointer hover:text-ink">Correct this entry</summary>
+      {open && (
+        <form onSubmit={submit} className="mt-3 space-y-3">
+          <p className="text-soft">The entry is shared, so a correction changes it for everyone.</p>
+          <TextArea label="Definition" name="definition" defaultValue={word.definition} rows={2} required maxLength={1000} />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Pronunciation" name="pronunciation" defaultValue={word.pronunciation ?? ""} maxLength={100} />
+            <Field label="Part of speech" name="partOfSpeech" defaultValue={word.partOfSpeech ?? ""} maxLength={40} />
+          </div>
+          <TextArea label="Etymology" name="etymology" defaultValue={word.etymology ?? ""} rows={3} maxLength={2000} />
+          <TextArea label="Examples, one per line" name="examples" defaultValue={word.examples.join("\n")} rows={3} />
+          <Field label="Related forms, separated by commas" name="relatedForms" defaultValue={word.relatedForms.join(", ")} />
+          <Field label="Synonyms, separated by commas" name="synonyms" defaultValue={word.synonyms.join(", ")} />
+          <Field label="Antonyms, separated by commas" name="antonyms" defaultValue={word.antonyms.join(", ")} />
+          {error && <Notice>{error}</Notice>}
+          <Button type="submit" variant="quiet" disabled={busy}>
+            {busy ? "Saving…" : "Save correction"}
+          </Button>
+        </form>
+      )}
+    </details>
+  );
+}
+
+function Others({ word, onChange }: { word: WordDetail; onChange: (action: () => Promise<WordDetail>) => void }) {
+  const me = useMe();
+  const users = useResource(api.listUsers);
+  const have = new Set(word.others.map((o) => o.user.id));
+  const candidates = (users.data?.users ?? []).filter((u) => u.id !== me.id && !have.has(u.id));
+
+  return (
+    <div className="mt-4 space-y-1 text-soft">
+      {word.others.map((o) => (
+        <p key={o.user.id}>
+          {o.user.displayName}: <Stage stage={o.stage} />
+        </p>
+      ))}
+      {word.curriculumPosition === null && candidates.length > 0 && (
+        <p>
+          Introduce this word to{" "}
+          {candidates.map((u, i) => (
+            <span key={u.id}>
+              {i > 0 && ", "}
+              <button
+                className="text-accent underline"
+                onClick={() => onChange(() => api.introduceWord(word.id, u.id))}
+              >
+                {u.displayName}
+              </button>
+            </span>
+          ))}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function WordStudy() {
   const { id } = useParams<{ id: string }>();
   const word = useResource(() => api.getWord(id), id);
@@ -259,7 +366,11 @@ export function WordStudy() {
         {error && <Notice>{error}</Notice>}
         {!progress ? (
           <div className="space-y-3">
-            <p className="text-soft">This word is in the collection but not yet on your list.</p>
+            <p className="text-soft">
+              {data.curriculumPosition === null
+                ? "This word is in the collection but not yet on your list."
+                : `This is word ${data.curriculumPosition} of the curriculum. You can begin it when it is your next word.`}
+            </p>
             <Button onClick={() => act(() => api.studyWord(data.id))}>Begin studying</Button>
           </div>
         ) : (
@@ -291,23 +402,11 @@ export function WordStudy() {
             </ol>
           </>
         )}
-        <p className="mt-4 text-soft">
-          {data.partnerStage ? (
-            <>
-              Your partner: <Stage stage={data.partnerStage} />
-            </>
-          ) : (
-            <button
-              className="text-accent underline"
-              onClick={() => act(() => api.introduceWord(data.id))}
-            >
-              Introduce this word to your partner
-            </button>
-          )}
-        </p>
+        <Others word={data} onChange={act} />
       </Section>
 
       <Encounters word={data} onChange={word.reload} />
+      <EditEntry word={data} onSaved={word.set} />
     </article>
   );
 }

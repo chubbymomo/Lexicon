@@ -41,6 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       href: "/review",
       label: due.data?.dueCount ? `Review (${due.data.dueCount})` : "Review",
     },
+    { href: "/progress", label: "Progress" },
   ];
 
   return (
@@ -50,18 +51,18 @@ export function AppShell({ children }: { children: ReactNode }) {
           Lexicon
         </Link>
         {session.data && (
-          <nav className="flex items-baseline gap-5">
+          <nav className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
             {links.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
                 aria-current={pathname === link.href ? "page" : undefined}
-                className="label hover:text-ink aria-[current=page]:text-accent"
+                className="label whitespace-nowrap hover:text-ink aria-[current=page]:text-accent"
               >
                 {link.label}
               </Link>
             ))}
-            <button onClick={signOut} className="label hover:text-ink">
+            <button onClick={signOut} className="label whitespace-nowrap hover:text-ink">
               Sign out
             </button>
           </nav>

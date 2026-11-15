@@ -1,6 +1,6 @@
 # Lexicon
 
-Two-person vocabulary learning app. See `README.md` for the product concept.
+Vocabulary learning app for a small private group. See `README.md` for the product concept.
 
 ## Layout
 
@@ -15,4 +15,5 @@ Two-person vocabulary learning app. See `README.md` for the product concept.
 - Next.js 16 and Prisma 7 differ from older versions; read `web/AGENTS.md` and the docs it points to before changing framework-level code.
 - Every endpoint is declared in `src/server/contract.ts`. When it changes, run `npm run openapi` and commit the regenerated `openapi/openapi.json`; the Android app depends on it.
 - The web UI must only use the public API (`src/lib/api.ts`), never direct server access, so both clients stay equivalent.
+- `prisma/curriculum.json` is the shared curriculum; after editing it run `npm run db:seed`.
 - Tests replace the tutor module; nothing in the test suite may call the Claude API.

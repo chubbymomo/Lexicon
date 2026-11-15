@@ -61,7 +61,7 @@ export default function LoginPage() {
             label="Invite code"
             name="inviteCode"
             required
-            hint="The code the two of you agreed on when setting Lexicon up."
+            hint="The code your group agreed on when setting Lexicon up."
           />
         )}
         {error && <Notice>{error}</Notice>}
@@ -78,7 +78,7 @@ export default function LoginPage() {
             setError(null);
           }}
         >
-          {registering ? "I already have an account" : "Create one of the two accounts"}
+          {registering ? "I already have an account" : "Create an account"}
         </button>
       )}
     </main>

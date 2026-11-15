@@ -87,7 +87,7 @@ export const DraftedEntry = z.object({
 });
 export type DraftedEntry = z.output<typeof DraftedEntry>;
 
-const DRAFT_SYSTEM = `You are a lexicographer writing entries for a private vocabulary-learning app used by two adult readers who want a deep understanding of English words: their origins, their construction and their natural use.
+const DRAFT_SYSTEM = `You are a lexicographer writing entries for a private vocabulary-learning app used by a small group of adult readers who want a deep understanding of English words: their origins, their construction and their natural use.
 
 Write with the precision and economy of a good dictionary. Be accurate about etymology; if a derivation is uncertain or disputed, say so rather than inventing one. For morphemes, give the forms a learner would recognise in other words, so that related words can be linked together.`;
 

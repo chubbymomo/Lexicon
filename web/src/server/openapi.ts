@@ -93,7 +93,7 @@ export function buildOpenApi(): Json {
       title: "Lexicon API",
       version: "1.0.0",
       description:
-        "API for Lexicon, a two-person vocabulary learning app. All scheduling, scoring and AI evaluation happen on the server, so every client sees the same state.\n\nAuthenticate with the token returned by `/auth/login` or `/auth/register`. Errors use the `ErrorBody` shape with a stable `code`.",
+        "API for Lexicon, a shared vocabulary learning app for a small private group. All scheduling, scoring and AI evaluation happen on the server, so every client sees the same state.\n\nAuthenticate with the token returned by `/auth/login` or `/auth/register`. Errors use the `ErrorBody` shape with a stable `code`.",
     },
     servers: [{ url: "/api/v1" }],
     paths,

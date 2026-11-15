@@ -1,6 +1,6 @@
 # Lexicon
 
-A private, two-person vocabulary learning app. Lexicon helps a couple expand their English vocabulary together through structured study, active recall, spaced repetition, and friendly competition.
+A private vocabulary learning app for a couple or a small group. Lexicon helps them expand their English vocabulary together through structured study, active recall, spaced repetition, and friendly competition.
 
 The goal is not simply to memorize definitions, but to understand words deeply: their origins, their construction, and how to use them naturally in speech and writing.
 
@@ -8,7 +8,7 @@ The goal is not simply to memorize definitions, but to understand words deeply: 
 
 ### 1. Vocabulary discovery and study
 
-Users discover new words or add words they encounter while reading. Each word has a study page with:
+Users work through a shared curriculum of words, the same words in the same order for everyone, and add words they encounter while reading. Each word has a study page with:
 
 - Definition and pronunciation
 - Etymology and historical origins
@@ -27,11 +27,11 @@ An Anki-inspired spaced repetition system, preferably FSRS, schedules reviews fr
 
 ### 4. Shared learning experience
 
-Both users share one vocabulary collection but keep independent learning progress, review schedules, and mastery levels. Users can introduce words to each other, see what their partner is studying, and take part in shared vocabulary challenges.
+All users share one vocabulary collection but keep independent learning progress, review schedules, and mastery levels. Users can introduce words to each other, see what the others are studying, and take part in shared vocabulary challenges.
 
 ### 5. Friendly competition
 
-A private two-person leaderboard encourages consistent learning through:
+A private leaderboard encourages consistent learning through:
 
 - Experience points (XP)
 - Daily and weekly challenges

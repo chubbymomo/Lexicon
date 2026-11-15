@@ -1,7 +1,6 @@
 /** The shared vocabulary collection and each word's study page. */
 import type { z } from "zod";
 import type { Prisma, User } from "@/generated/prisma/client";
-import { partnerOf } from "../auth";
 import type {
   CreateWordBody,
   EncounterInput,
@@ -11,6 +10,7 @@ import type {
 } from "../contract";
 import { db } from "../db";
 import { conflict, notFound } from "../errors";
+import { settle } from "./competition";
 import { awardXp } from "./progress";
 import { draftEntry } from "./tutor";
 
@@ -60,24 +60,27 @@ export function serializeProgress(userWord: UserWordWithSentences) {
 
 const summaryInclude = {
   addedBy: true,
-  userWords: { include: progressInclude },
+  userWords: { include: { ...progressInclude, user: true } },
 } satisfies Prisma.WordInclude;
 
 type WordForSummary = Prisma.WordGetPayload<{ include: typeof summaryInclude }>;
 
 function serializeSummary(word: WordForSummary, userId: string) {
   const mine = word.userWords.find((uw) => uw.userId === userId);
-  const partners = word.userWords.find((uw) => uw.userId !== userId);
   return {
     id: word.id,
     lemma: word.lemma,
     partOfSpeech: word.partOfSpeech,
     definition: word.definition,
     difficulty: word.difficulty,
-    addedBy: publicUser(word.addedBy),
+    addedBy: word.addedBy && publicUser(word.addedBy),
+    curriculumPosition: word.curriculumPosition,
     createdAt: word.createdAt.toISOString(),
     myProgress: mine ? serializeProgress(mine) : null,
-    partnerStage: partners?.stage ?? null,
+    others: word.userWords
+      .filter((uw) => uw.userId !== userId)
+      .map((uw) => ({ user: publicUser(uw.user), stage: uw.stage }))
+      .sort((a, b) => a.user.displayName.localeCompare(b.user.displayName)),
   };
 }
 
@@ -221,6 +224,7 @@ export async function createWord(user: User, body: z.output<typeof CreateWordBod
     await awardXp(tx, user.id, "WORD_ADDED", word.id);
     return word.id;
   });
+  await settle(user.id);
   return wordDetail(user, wordId);
 }
 
@@ -264,33 +268,159 @@ export async function addEncounter(
 ) {
   if (!(await db.word.findUnique({ where: { id: wordId } }))) throw notFound("Word");
   await createEncounter(db, user.id, wordId, input);
+  await settle(user.id);
   return wordDetail(user, wordId);
 }
 
 /** Add a word to the user's own study list. Idempotent. */
 export async function studyWord(user: User, wordId: string) {
-  if (!(await db.word.findUnique({ where: { id: wordId } }))) throw notFound("Word");
+  const word = await db.word.findUnique({ where: { id: wordId } });
+  if (!word) throw notFound("Word");
+  const mine = { userId_wordId: { userId: user.id, wordId } };
+  if (word.curriculumPosition !== null && !(await db.userWord.findUnique({ where: mine }))) {
+    // Curriculum words are taken in order, so only the next one can be begun.
+    const state = await curriculum(user);
+    if (state.next?.id !== wordId) {
+      throw conflict("This word comes later in the curriculum; words are studied in order");
+    }
+    if (!state.canStartNext) {
+      throw conflict(
+        `Finish the five sentences for a word in progress before starting another (limit ${MAX_CURRICULUM_IN_PROGRESS})`,
+      );
+    }
+  }
   await db.userWord.upsert({
-    where: { userId_wordId: { userId: user.id, wordId } },
+    where: mine,
     update: {},
     create: { userId: user.id, wordId },
   });
   return wordDetail(user, wordId);
 }
 
-/** Put a word on the partner's study list, credited to the user. */
-export async function introduceWord(user: User, wordId: string) {
-  if (!(await db.word.findUnique({ where: { id: wordId } }))) throw notFound("Word");
-  const partner = await partnerOf(user.id);
-  if (!partner) throw conflict("Your partner has not joined yet");
+/** Put a word on another player's study list, credited to the user. */
+export async function introduceWord(user: User, wordId: string, targetId: string) {
+  const word = await db.word.findUnique({ where: { id: wordId } });
+  if (!word) throw notFound("Word");
+  if (word.curriculumPosition !== null) {
+    throw conflict("Curriculum words reach everyone in order and cannot be introduced");
+  }
+  if (targetId === user.id) throw conflict("Use the study endpoint to add a word for yourself");
+  const target = await db.user.findUnique({ where: { id: targetId } });
+  if (!target) throw notFound("Player");
   const existing = await db.userWord.findUnique({
-    where: { userId_wordId: { userId: partner.id, wordId } },
+    where: { userId_wordId: { userId: target.id, wordId } },
   });
-  if (existing) throw conflict(`${partner.displayName} already has this word`);
+  if (existing) throw conflict(`${target.displayName} already has this word`);
   await db.userWord.create({
-    data: { userId: partner.id, wordId, introducedById: user.id },
+    data: { userId: target.id, wordId, introducedById: user.id },
   });
+  await settle(user.id);
   return wordDetail(user, wordId);
+}
+
+export async function listUsers() {
+  const users = await db.user.findMany({ orderBy: { displayName: "asc" } });
+  return { users: users.map(publicUser) };
+}
+
+// --- The shared curriculum --------------------------------------------------
+
+/** How many curriculum words a player may have unfinished before starting another. */
+export const MAX_CURRICULUM_IN_PROGRESS = 3;
+
+export async function curriculum(user: User) {
+  const [total, mine, users, studiedByUser] = await Promise.all([
+    db.word.count({ where: { curriculumPosition: { not: null } } }),
+    db.word.findMany({
+      where: {
+        curriculumPosition: { not: null },
+        userWords: { some: { userId: user.id } },
+      },
+      include: summaryInclude,
+      orderBy: { curriculumPosition: "asc" },
+    }),
+    db.user.findMany({ orderBy: { createdAt: "asc" } }),
+    db.userWord.groupBy({
+      by: ["userId"],
+      where: { studiedAt: { not: null }, word: { curriculumPosition: { not: null } } },
+      _count: true,
+    }),
+  ]);
+  // Everyone takes the words in the same order: the next one is the first not yet started.
+  const next = await db.word.findFirst({
+    where: { curriculumPosition: { not: null }, NOT: { userWords: { some: { userId: user.id } } } },
+    include: summaryInclude,
+    orderBy: { curriculumPosition: "asc" },
+  });
+  const summaries = mine.map((w) => serializeSummary(w, user.id));
+  const inProgress = summaries.filter((w) => w.myProgress?.stage === "STUDYING");
+  const studied = new Map(studiedByUser.map((row) => [row.userId, row._count]));
+  return {
+    total,
+    started: summaries.length,
+    studied: summaries.length - inProgress.length,
+    inProgress,
+    next: next && serializeSummary(next, user.id),
+    canStartNext: next !== null && inProgress.length < MAX_CURRICULUM_IN_PROGRESS,
+    maxInProgress: MAX_CURRICULUM_IN_PROGRESS,
+    players: users
+      .map((u) => ({ user: publicUser(u), isMe: u.id === user.id, studied: studied.get(u.id) ?? 0 }))
+      .sort((a, b) => b.studied - a.studied),
+  };
+}
+
+export type CurriculumEntry = {
+  lemma: string;
+  pronunciation: string;
+  partOfSpeech: string;
+  definition: string;
+  etymology: string;
+  /** [kind, form, meaning, origin] */
+  morphemes: [z.output<typeof MorphemeInput>["kind"], string, string, string][];
+  relatedForms: string[];
+  synonyms: string[];
+  antonyms: string[];
+  examples: string[];
+  difficulty: number;
+};
+
+/**
+ * Load the curriculum: the list's order becomes every player's order. Safe to
+ * re-run; existing words are updated in place and keep players' progress. A
+ * word a player had already added is adopted into the curriculum.
+ */
+export async function seedCurriculum(entries: CurriculumEntry[]): Promise<number> {
+  await db.$transaction(
+    async (tx) => {
+      // Clear positions first so a reordered list cannot collide with itself.
+      await tx.word.updateMany({
+        where: { curriculumPosition: { not: null } },
+        data: { curriculumPosition: null },
+      });
+      for (const [index, entry] of entries.entries()) {
+        const { morphemes, lemma, ...fields } = entry;
+        const data = { ...fields, curriculumPosition: index + 1 };
+        const word = await tx.word.upsert({
+          where: { lemma },
+          update: data,
+          create: { lemma, ...data },
+        });
+        await setMorphemes(
+          tx,
+          word.id,
+          morphemes.map(([kind, form, meaning, origin]) => ({ kind, form, meaning, origin })),
+        );
+      }
+    },
+    { timeout: 120_000 },
+  );
+  return entries.length;
+}
+
+export async function startNextCurriculumWord(user: User) {
+  const state = await curriculum(user);
+  if (!state.next) throw conflict("You have started every word in the curriculum");
+  return studyWord(user, state.next.id);
 }
 
 export { progressInclude };

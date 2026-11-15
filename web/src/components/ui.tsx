@@ -87,3 +87,26 @@ export function dueText(due: string | null): string {
   if (days === 1) return "due tomorrow";
   return `due in ${days} days`;
 }
+
+/** A thin progress bar with its value written beside it. */
+export function Meter({ value, max, label }: { value: number; max: number; label: string }) {
+  const percent = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return (
+    <div className="flex items-center gap-3">
+      <div
+        role="progressbar"
+        aria-valuenow={value}
+        aria-valuemin={0}
+        aria-valuemax={max}
+        aria-label={label}
+        className="h-1.5 flex-1 overflow-hidden rounded-full bg-rule"
+      >
+        <div
+          className={`h-full rounded-full ${value >= max ? "bg-good" : "bg-accent"}`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <span className="shrink-0 text-sm text-soft tabular-nums">{label}</span>
+    </div>
+  );
+}

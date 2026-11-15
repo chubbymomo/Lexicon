@@ -65,7 +65,9 @@ export const LoginBody = z
 
 export const Meta = z
   .object({
-    registrationOpen: z.boolean().meta({ description: "False once both accounts exist." }),
+    registrationOpen: z.boolean().meta({
+      description: "False once the server's optional account cap has been reached.",
+    }),
     tutorAvailable: z.boolean().meta({
       description: "Whether AI drafting of word entries and sentence evaluation are configured.",
     }),
@@ -96,10 +98,17 @@ export const WordSummary = z
     partOfSpeech: z.string().nullable(),
     definition: z.string(),
     difficulty: z.number().int().min(1).max(5),
-    addedBy: PublicUser,
+    addedBy: PublicUser.nullable().meta({
+      description: "Who added the word; null for words that ship with the curriculum.",
+    }),
+    curriculumPosition: z.number().int().nullable().meta({
+      description: "Place in the shared curriculum (1-based); null for words a player added.",
+    }),
     createdAt: isoDate,
     myProgress: Progress.nullable().meta({ description: "Null if you have not started this word." }),
-    partnerStage: LearningStage.nullable(),
+    others: z
+      .array(z.object({ user: PublicUser, stage: LearningStage }))
+      .meta({ description: "The other players who have this word, and how far along they are." }),
   })
   .meta({ id: "WordSummary" });
 
@@ -231,6 +240,36 @@ export const ListWordsQuery = z.object({
 
 export const WordList = z.object({ words: z.array(WordSummary) }).meta({ id: "WordList" });
 
+export const IntroduceBody = z
+  .object({ userId: z.string().meta({ description: "The player to introduce the word to." }) })
+  .meta({ id: "IntroduceBody" });
+
+export const UserList = z.object({ users: z.array(PublicUser) }).meta({ id: "UserList" });
+
+// --- Curriculum -------------------------------------------------------------
+
+export const Curriculum = z
+  .object({
+    total: z.number().int().meta({ description: "Number of words in the curriculum." }),
+    started: z.number().int().meta({ description: "Curriculum words on your list." }),
+    studied: z.number().int().meta({ description: "Curriculum words whose study you finished." }),
+    inProgress: z.array(WordSummary).meta({
+      description: "Curriculum words you have started but not finished studying.",
+    }),
+    next: WordSummary.nullable().meta({
+      description: "The next word in order that you have not started; null at the end.",
+    }),
+    canStartNext: z.boolean().meta({
+      description:
+        "False while too many curriculum words are unfinished; finish their five sentences first.",
+    }),
+    maxInProgress: z.number().int(),
+    players: z
+      .array(z.object({ user: PublicUser, isMe: z.boolean(), studied: z.number().int() }))
+      .meta({ description: "How far every player has come through the same list." }),
+  })
+  .meta({ id: "Curriculum" });
+
 export const SubmitSentenceBody = z
   .object({
     slot: z.number().int().min(1).max(5),
@@ -323,6 +362,83 @@ export const Leaderboard = z
   .object({ weekStartsAt: isoDate, entries: z.array(LeaderboardEntry) })
   .meta({ id: "Leaderboard" });
 
+export const Challenge = z
+  .object({
+    id: z.string().meta({ description: "Stable identifier of the challenge type." }),
+    period: z.enum(["DAILY", "WEEKLY"]),
+    scope: z.enum(["PERSONAL", "SHARED"]).meta({
+      description: "SHARED challenges count every player's work towards one target.",
+    }),
+    title: z.string(),
+    description: z.string(),
+    target: z.number().int(),
+    progress: z.number().int().meta({ description: "Capped at `target`." }),
+    completed: z.boolean(),
+    xp: z.number().int().meta({ description: "XP awarded on completion." }),
+    endsAt: isoDate,
+  })
+  .meta({ id: "Challenge" });
+
+export const ChallengeList = z
+  .object({ challenges: z.array(Challenge) })
+  .meta({ id: "ChallengeList" });
+
+export const Achievement = z
+  .object({
+    code: z.string(),
+    title: z.string(),
+    description: z.string(),
+    target: z.number().int(),
+    progress: z.number().int().meta({ description: "Capped at `target`." }),
+    unlockedAt: isoDate.nullable(),
+  })
+  .meta({ id: "Achievement" });
+
+export const AchievementList = z
+  .object({ achievements: z.array(Achievement) })
+  .meta({ id: "AchievementList" });
+
+export const StatsQuery = z.object({
+  userId: z.string().optional().meta({ description: "Another player's id; defaults to you." }),
+});
+
+export const Stats = z
+  .object({
+    user: PublicUser,
+    stages: z.object({
+      studying: z.number().int(),
+      reviewing: z.number().int(),
+      mastered: z.number().int(),
+    }),
+    recallRate: z.number().nullable().meta({
+      description:
+        "Share of reviews in the last 30 days that were recalled (rated Hard or better), 0 to 1. Null with no reviews.",
+    }),
+    weeks: z
+      .array(
+        z.object({
+          weekStart: z.string().meta({ description: "Monday of the week, YYYY-MM-DD." }),
+          studied: z.number().int().meta({ description: "Words studied by the end of the week (cumulative)." }),
+          mastered: z.number().int().meta({ description: "Words mastered by the end of the week (cumulative)." }),
+        }),
+      )
+      .meta({ description: "The last 12 weeks, oldest first." }),
+    days: z
+      .array(
+        z.object({
+          day: z.string().meta({ description: "YYYY-MM-DD." }),
+          reviews: z.number().int(),
+          recalled: z.number().int(),
+          xp: z.number().int(),
+        }),
+      )
+      .meta({ description: "The last 30 days, oldest first." }),
+    forecast: z
+      .array(z.object({ day: z.string(), due: z.number().int() }))
+      .meta({ description: "Reviews coming due over the next 14 days; overdue cards count today." }),
+  })
+  .meta({ id: "Stats" });
+
 // --- Errors -----------------------------------------------------------------
 
 export const ErrorBody = z
@@ -370,8 +486,8 @@ export const endpoints = {
     method: "POST",
     path: "/auth/register",
     tag: "Auth",
-    summary: "Create one of the two accounts",
-    description: "Requires the shared invite code. Fails once two accounts exist.",
+    summary: "Create an account",
+    description: "Requires the shared invite code. 403 once the server's account cap is reached.",
     auth: false,
     body: RegisterBody,
     response: AuthResponse,
@@ -399,6 +515,14 @@ export const endpoints = {
     summary: "The signed-in user",
     auth: true,
     response: Me,
+  }),
+  listUsers: endpoint({
+    method: "GET",
+    path: "/users",
+    tag: "Auth",
+    summary: "Every player",
+    auth: true,
+    response: UserList,
   }),
   listWords: endpoint({
     method: "GET",
@@ -460,9 +584,10 @@ export const endpoints = {
     method: "POST",
     path: "/words/{id}/introduce",
     tag: "Study",
-    summary: "Introduce a word to your partner",
+    summary: "Introduce a word to another player",
     description: "Adds it to their study list, credited to you. 409 if they already have it.",
     auth: true,
+    body: IntroduceBody,
     response: WordDetail,
   }),
   submitSentence: endpoint({
@@ -496,11 +621,57 @@ export const endpoints = {
     body: SubmitReviewBody,
     response: ReviewResult,
   }),
+  curriculum: endpoint({
+    method: "GET",
+    path: "/curriculum",
+    tag: "Curriculum",
+    summary: "Your place in the shared curriculum",
+    description:
+      "The curriculum is a fixed, ordered list of words that every player works through in the same order.",
+    auth: true,
+    response: Curriculum,
+  }),
+  startNextCurriculumWord: endpoint({
+    method: "POST",
+    path: "/curriculum/next",
+    tag: "Curriculum",
+    summary: "Begin the next curriculum word",
+    description:
+      "Adds the next word in order to your study list. 409 if `canStartNext` is false or the curriculum is finished.",
+    auth: true,
+    response: WordDetail,
+  }),
+  challenges: endpoint({
+    method: "GET",
+    path: "/challenges",
+    tag: "Competition",
+    summary: "Today's and this week's challenges",
+    auth: true,
+    response: ChallengeList,
+  }),
+  achievements: endpoint({
+    method: "GET",
+    path: "/achievements",
+    tag: "Competition",
+    summary: "Milestones reached and still ahead",
+    auth: true,
+    query: StatsQuery,
+    response: AchievementList,
+  }),
+  stats: endpoint({
+    method: "GET",
+    path: "/stats",
+    tag: "Competition",
+    summary: "Progress over time",
+    auth: true,
+    query: StatsQuery,
+    response: Stats,
+  }),
   leaderboard: endpoint({
     method: "GET",
     path: "/leaderboard",
     tag: "Competition",
-    summary: "Both users' standing",
+    summary: "Every player's standing",
     auth: true,
     response: Leaderboard,
   }),

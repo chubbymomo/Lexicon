@@ -11,8 +11,16 @@ const scryptAsync = promisify(scrypt) as (
 ) => Promise<Buffer>;
 
 export const SESSION_COOKIE = "lexicon_session";
-/** Lexicon is for two people. */
-export const MAX_USERS = 2;
+/** Optional cap on accounts (`LEXICON_MAX_USERS`); unlimited when unset. */
+export function maxUsers(): number | null {
+  const cap = Number(process.env.LEXICON_MAX_USERS);
+  return Number.isInteger(cap) && cap > 0 ? cap : null;
+}
+
+export async function registrationOpen(): Promise<boolean> {
+  const cap = maxUsers();
+  return cap === null || (await db.user.count()) < cap;
+}
 const SESSION_DAYS = 180;
 
 export async function hashPassword(password: string): Promise<string> {
@@ -61,8 +69,9 @@ export async function register(input: {
   const user = await db.$transaction(async (tx) => {
     // Serialize sign-ups so two concurrent requests cannot exceed the cap.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(7310001)`;
-    if ((await tx.user.count()) >= MAX_USERS) {
-      throw forbidden("Both accounts have already been created");
+    const cap = maxUsers();
+    if (cap !== null && (await tx.user.count()) >= cap) {
+      throw forbidden("Every account has already been created");
     }
     if (await tx.user.findUnique({ where: { email } })) {
       throw conflict("An account with that email already exists");
@@ -123,9 +132,4 @@ export function sessionCookie(token: string | null): string {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   const base = `${SESSION_COOKIE}=${token ? encodeURIComponent(token) : ""}; Path=/; HttpOnly; SameSite=Lax${secure}`;
   return token ? `${base}; Max-Age=${SESSION_DAYS * 86_400}` : `${base}; Max-Age=0`;
-}
-
-/** The other person, if they have signed up yet. */
-export async function partnerOf(userId: string): Promise<User | null> {
-  return db.user.findFirst({ where: { id: { not: userId } }, orderBy: { createdAt: "asc" } });
 }

@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "openapi": "tsx scripts/generate-openapi.ts",
     "postinstall": "prisma generate",
-    "db:migrate": "prisma migrate deploy"
+    "db:migrate": "prisma migrate deploy && tsx prisma/seed.mts",
+    "db:seed": "tsx prisma/seed.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",

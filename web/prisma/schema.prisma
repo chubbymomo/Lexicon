@@ -25,6 +25,7 @@ model User {
   reviews     ReviewLog[]
   xpEvents    XpEvent[]
   introduced  UserWord[]  @relation("introducedBy")
+  achievements Achievement[]
 }
 
 /// An API token. Only the SHA-256 of the token is stored.
@@ -62,10 +63,14 @@ model Word {
   examples      String[]
   /// 1 (common) to 5 (rare or difficult).
   difficulty    Int      @default(3)
-  addedById     String
+  /// Null for words that ship with the curriculum.
+  addedById     String?
+  /// Place in the shared curriculum every player works through in the same
+  /// order. Null for words a player added themselves.
+  curriculumPosition Int? @unique
   createdAt     DateTime @default(now())
 
-  addedBy    User        @relation(fields: [addedById], references: [id])
+  addedBy    User?       @relation(fields: [addedById], references: [id])
   morphemes  WordMorpheme[]
   userWords  UserWord[]
   encounters Encounter[]
@@ -240,6 +245,7 @@ enum XpReason {
   WORD_STUDIED
   REVIEW_CORRECT
   WORD_MASTERED
+  CHALLENGE_COMPLETED
 }
 
 /// Append-only ledger; totals, streaks and the leaderboard are derived from it.
@@ -249,9 +255,23 @@ model XpEvent {
   reason    XpReason
   amount    Int
   wordId    String?
+  /// Identifies a one-off award (e.g. a challenge in a given week) so it is granted once.
+  key       String?
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, key])
   @@index([userId, createdAt])
+}
+
+/// A milestone a user has reached. The catalogue lives in code.
+model Achievement {
+  userId     String
+  code       String
+  unlockedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, code])
 }
