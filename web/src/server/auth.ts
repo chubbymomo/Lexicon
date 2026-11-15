@@ -128,8 +128,21 @@ export async function userFromRequest(request: Request): Promise<User> {
   return session.user;
 }
 
-export function sessionCookie(token: string | null): string {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+/**
+ * Whether the browser reached us over HTTPS, directly or through a reverse
+ * proxy. A `Secure` cookie on a plain-HTTP site would be silently dropped and
+ * sign-in would appear to do nothing, so the flag follows the connection.
+ * `LEXICON_SECURE_COOKIES` ("true" or "false") overrides the detection.
+ */
+function isHttps(request: Request): boolean {
+  const override = process.env.LEXICON_SECURE_COOKIES;
+  if (override === "true" || override === "false") return override === "true";
+  const forwarded = request.headers.get("x-forwarded-proto")?.split(",")[0].trim();
+  return (forwarded ?? new URL(request.url).protocol.replace(":", "")) === "https";
+}
+
+export function sessionCookie(token: string | null, request: Request): string {
+  const secure = isHttps(request) ? "; Secure" : "";
   const base = `${SESSION_COOKIE}=${token ? encodeURIComponent(token) : ""}; Path=/; HttpOnly; SameSite=Lax${secure}`;
   return token ? `${base}; Max-Age=${SESSION_DAYS * 86_400}` : `${base}; Max-Age=0`;
 }

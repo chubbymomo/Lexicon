@@ -21,7 +21,10 @@ Open the app and choose "Create an account". Everyone uses the invite code from 
 | `LEXICON_INVITE_CODE` | Shared secret required to create an account. |
 | `LEXICON_MAX_USERS` | Optional cap on the number of accounts. Unlimited when unset. |
 | `ANTHROPIC_API_KEY` | Enables the AI tutor. Without it, entries are written by hand and sentences cannot be evaluated. |
+| `LEXICON_SECURE_COOKIES` | Leave unset: the session cookie is marked `Secure` when the request arrives over HTTPS. Set `true` or `false` to force it. |
 | `LEXICON_TIMEZONE` | IANA zone (for example `America/New_York`) used for streak days and the weekly leaderboard. Defaults to UTC. |
+
+To deploy with Docker instead, see the repository's top-level README.
 
 ## Checks
 

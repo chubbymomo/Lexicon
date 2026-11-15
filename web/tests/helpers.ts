@@ -15,12 +15,14 @@ export async function call<T = any>(
     body?: unknown;
     params?: Record<string, string>;
     query?: string;
+    headers?: Record<string, string>;
   } = {},
 ): Promise<{ status: number; data: T; headers: Headers }> {
   const method = options.method ?? (options.body === undefined ? "GET" : "POST");
   const request = new Request(`http://test/api${options.query ?? ""}`, {
     method,
     headers: {
+      ...options.headers,
       ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
       ...(options.body === undefined ? {} : { "content-type": "application/json" }),
     },

@@ -118,7 +118,17 @@ describe("accounts", () => {
       body: { email: "ADA@example.com", password: "correct horse battery" },
     });
     expect(signedIn.status).toBe(200);
-    expect(signedIn.headers.get("set-cookie")).toContain("lexicon_session=");
+    const cookie = signedIn.headers.get("set-cookie")!;
+    expect(cookie).toContain("lexicon_session=");
+    expect(cookie).toContain("HttpOnly");
+    // Plain HTTP must not get a Secure cookie, or the browser would drop it.
+    expect(cookie).not.toContain("Secure");
+
+    const behindTls = await call(login, {
+      body: { email: "ada@example.com", password: "correct horse battery" },
+      headers: { "x-forwarded-proto": "https" },
+    });
+    expect(behindTls.headers.get("set-cookie")).toContain("Secure");
 
     await call(logout, { token, method: "POST" });
     expect((await call(me, { token })).status).toBe(401);
