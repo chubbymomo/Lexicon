@@ -57,3 +57,13 @@ Lexicon should feel like a thoughtfully designed personal learning companion rat
 ## Ultimate goal
 
 Transform unfamiliar words into vocabulary that both users can confidently recognize, recall, understand, and use for the rest of their lives.
+
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| [`web/`](web/) | The web app and the HTTP API (Next.js, Postgres, FSRS, Claude). Start with [`web/README.md`](web/README.md). |
+| [`openapi/openapi.json`](openapi/openapi.json) | The API contract every client is built against. |
+| [`android/`](android/) | The Android app, a client of the same API. |
+
+All scheduling, scoring and AI evaluation run on the server, so the web and Android apps always agree.

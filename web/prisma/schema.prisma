@@ -1,0 +1,257 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// People and sign-in
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  displayName  String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  sessions    Session[]
+  wordsAdded  Word[]
+  userWords   UserWord[]
+  encounters  Encounter[]
+  reviews     ReviewLog[]
+  xpEvents    XpEvent[]
+  introduced  UserWord[]  @relation("introducedBy")
+}
+
+/// An API token. Only the SHA-256 of the token is stored.
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  /// Free-form client label, e.g. "web" or "android".
+  client     String   @default("web")
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+  expiresAt  DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// The shared vocabulary collection
+// ---------------------------------------------------------------------------
+
+model Word {
+  id            String   @id @default(cuid())
+  /// Lower-cased headword; the shared collection holds each word once.
+  lemma         String   @unique
+  pronunciation String?
+  partOfSpeech  String?
+  definition    String
+  etymology     String?
+  /// Other forms of the word, e.g. "ephemerality (noun)".
+  relatedForms  String[]
+  synonyms      String[]
+  antonyms      String[]
+  examples      String[]
+  /// 1 (common) to 5 (rare or difficult).
+  difficulty    Int      @default(3)
+  addedById     String
+  createdAt     DateTime @default(now())
+
+  addedBy    User        @relation(fields: [addedById], references: [id])
+  morphemes  WordMorpheme[]
+  userWords  UserWord[]
+  encounters Encounter[]
+}
+
+enum MorphemeKind {
+  PREFIX
+  ROOT
+  SUFFIX
+}
+
+/// A prefix, root or suffix. Words that share one are linguistically related.
+model Morpheme {
+  id      String       @id @default(cuid())
+  kind    MorphemeKind
+  /// The morpheme as written, e.g. "bene", "-ous".
+  form    String
+  meaning String
+  /// Language of origin, e.g. "Latin".
+  origin  String?
+
+  words WordMorpheme[]
+
+  @@unique([kind, form])
+}
+
+model WordMorpheme {
+  wordId     String
+  morphemeId String
+  /// Order of the morpheme within the word, starting at 0.
+  position   Int
+
+  word     Word     @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  morpheme Morpheme @relation(fields: [morphemeId], references: [id], onDelete: Cascade)
+
+  @@id([wordId, morphemeId])
+  @@index([morphemeId])
+}
+
+/// Where a user met a word while reading.
+model Encounter {
+  id          String   @id @default(cuid())
+  wordId      String
+  userId      String
+  sourceTitle String
+  sourceAuthor String?
+  /// "book", "article", "other".
+  sourceKind  String   @default("book")
+  passage     String?
+  note        String?
+  createdAt   DateTime @default(now())
+
+  word Word @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([wordId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Each user's own progress on a word
+// ---------------------------------------------------------------------------
+
+enum LearningStage {
+  /// In the user's list, five sentences not yet accepted.
+  STUDYING
+  /// Five sentences accepted; now in spaced repetition.
+  REVIEWING
+  /// Long, stable review interval reached.
+  MASTERED
+}
+
+/// FSRS card state, mirroring ts-fsrs `State`.
+enum CardState {
+  NEW
+  LEARNING
+  REVIEW
+  RELEARNING
+}
+
+model UserWord {
+  id             String        @id @default(cuid())
+  userId         String
+  wordId         String
+  stage          LearningStage @default(STUDYING)
+  /// Set when the partner introduced this word to the user.
+  introducedById String?
+  createdAt      DateTime      @default(now())
+  studiedAt      DateTime?
+  masteredAt     DateTime?
+
+  // FSRS card. Null `due` means the card is not yet scheduled.
+  due           DateTime?
+  stability     Float     @default(0)
+  fsrsDifficulty Float    @default(0)
+  elapsedDays   Int       @default(0)
+  scheduledDays Int       @default(0)
+  learningSteps Int       @default(0)
+  reps          Int       @default(0)
+  lapses        Int       @default(0)
+  cardState     CardState @default(NEW)
+  lastReview    DateTime?
+
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word         Word       @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  introducedBy User?      @relation("introducedBy", fields: [introducedById], references: [id])
+  sentences    Sentence[]
+  reviews      ReviewLog[]
+
+  @@unique([userId, wordId])
+  @@index([userId, due])
+}
+
+enum SentenceVerdict {
+  ACCEPTED
+  NEEDS_REVISION
+}
+
+/// One attempt at one of the five sentences. Revisions add rows to the same slot.
+model Sentence {
+  id          String          @id @default(cuid())
+  userWordId  String
+  /// 1 to 5.
+  slot        Int
+  text        String
+  verdict     SentenceVerdict
+  grammarOk   Boolean
+  usageOk     Boolean
+  contextOk   Boolean
+  feedback    String
+  /// A corrected version, when the tutor offers one.
+  suggestion  String?
+  createdAt   DateTime        @default(now())
+
+  userWord UserWord @relation(fields: [userWordId], references: [id], onDelete: Cascade)
+
+  @@index([userWordId, slot])
+}
+
+enum ReviewKind {
+  DEFINITION_RECALL
+  WORD_FROM_CONTEXT
+  SENTENCE
+}
+
+model ReviewLog {
+  id            String     @id @default(cuid())
+  userWordId    String
+  userId        String
+  kind          ReviewKind
+  /// 1 Again, 2 Hard, 3 Good, 4 Easy.
+  rating        Int
+  stateBefore   CardState
+  stability     Float
+  fsrsDifficulty Float
+  scheduledDays Int
+  reviewedAt    DateTime   @default(now())
+
+  userWord UserWord @relation(fields: [userWordId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, reviewedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Friendly competition
+// ---------------------------------------------------------------------------
+
+enum XpReason {
+  WORD_ADDED
+  SENTENCE_ACCEPTED
+  WORD_STUDIED
+  REVIEW_CORRECT
+  WORD_MASTERED
+}
+
+/// Append-only ledger; totals, streaks and the leaderboard are derived from it.
+model XpEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  reason    XpReason
+  amount    Int
+  wordId    String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}

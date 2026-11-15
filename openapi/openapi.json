@@ -1,0 +1,2030 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Lexicon API",
+    "version": "1.0.0",
+    "description": "API for Lexicon, a two-person vocabulary learning app. All scheduling, scoring and AI evaluation happen on the server, so every client sees the same state.\n\nAuthenticate with the token returned by `/auth/login` or `/auth/register`. Errors use the `ErrorBody` shape with a stable `code`."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "paths": {
+    "/meta": {
+      "get": {
+        "operationId": "meta",
+        "tags": [
+          "Meta"
+        ],
+        "summary": "Server capabilities",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Meta"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "operationId": "register",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Create one of the two accounts",
+        "description": "Requires the shared invite code. Fails once two accounts exist.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "login",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Sign in",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Revoke the current token",
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/me": {
+      "get": {
+        "operationId": "me",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "The signed-in user",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/words": {
+      "get": {
+        "operationId": "listWords",
+        "tags": [
+          "Words"
+        ],
+        "summary": "The shared vocabulary collection",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Filter by lemma prefix.",
+            "schema": {
+              "type": "string",
+              "maxLength": 60
+            }
+          },
+          {
+            "name": "stage",
+            "in": "query",
+            "required": false,
+            "description": "Filter by your own stage.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "STUDYING",
+                "REVIEWING",
+                "MASTERED",
+                "NOT_STARTED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WordList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createWord",
+        "tags": [
+          "Words"
+        ],
+        "summary": "Add a word to the shared collection",
+        "description": "Send only `lemma` to have the AI tutor draft the entry (503 `tutor_unavailable` if not configured), or include `definition` and any other fields to save your own. 409 if the word already exists.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWordBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WordDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/words/{id}": {
+      "get": {
+        "operationId": "getWord",
+        "tags": [
+          "Words"
+        ],
+        "summary": "A word's study page",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WordDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "updateWord",
+        "tags": [
+          "Words"
+        ],
+        "summary": "Correct a word's entry",
+        "description": "Sent list fields replace the stored lists.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWordBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WordDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/words/{id}/encounters": {
+      "post": {
+        "operationId": "addEncounter",
+        "tags": [
+          "Words"
+        ],
+        "summary": "Record where you met this word while reading",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EncounterInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WordDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/words/{id}/study": {
+      "post": {
+        "operationId": "studyWord",
+        "tags": [
+          "Study"
+        ],
+        "summary": "Add a word to your own study list",
+        "description": "Idempotent.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WordDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/words/{id}/introduce": {
+      "post": {
+        "operationId": "introduceWord",
+        "tags": [
+          "Study"
+        ],
+        "summary": "Introduce a word to your partner",
+        "description": "Adds it to their study list, credited to you. 409 if they already have it.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WordDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/words/{id}/sentences": {
+      "post": {
+        "operationId": "submitSentence",
+        "tags": [
+          "Study"
+        ],
+        "summary": "Submit one of your five sentences for evaluation",
+        "description": "The tutor evaluates grammar, usage and context. Resubmit the same slot to revise. When all five slots are accepted the word moves to REVIEWING and its first review is scheduled.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitSentenceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SentenceResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/reviews/due": {
+      "get": {
+        "operationId": "dueReviews",
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Reviews due now",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DueReviews"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/reviews": {
+      "post": {
+        "operationId": "submitReview",
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Record the outcome of a review",
+        "description": "Schedules the next review with FSRS. 409 if the card is not due yet, so reviewing early earns nothing.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitReviewBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/leaderboard": {
+      "get": {
+        "operationId": "leaderboard",
+        "tags": [
+          "Competition"
+        ],
+        "summary": "Both users' standing",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Leaderboard"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "AuthResponse": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Send as `Authorization: Bearer <token>` on every later request."
+          },
+          "user": {
+            "$ref": "#/components/schemas/Me"
+          }
+        },
+        "required": [
+          "token",
+          "user"
+        ],
+        "additionalProperties": false
+      },
+      "CreateWordBody": {
+        "type": "object",
+        "properties": {
+          "lemma": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60,
+            "pattern": "^[\\p{L}][\\p{L}' -]*$"
+          },
+          "definition": {
+            "description": "Omit to have the AI tutor draft the whole entry. If given, the entry is saved exactly as sent.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "pronunciation": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "partOfSpeech": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "etymology": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "relatedForms": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "synonyms": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "antonyms": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "examples": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "difficulty": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "morphemes": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MorphemeInput"
+            }
+          },
+          "encounter": {
+            "$ref": "#/components/schemas/EncounterInput"
+          },
+          "study": {
+            "default": true,
+            "description": "Also add the word to your study list.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "lemma"
+        ]
+      },
+      "DueReviews": {
+        "type": "object",
+        "properties": {
+          "dueCount": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "cards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewCard"
+            }
+          }
+        },
+        "required": [
+          "dueCount",
+          "cards"
+        ],
+        "additionalProperties": false
+      },
+      "Encounter": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "sourceTitle": {
+            "type": "string"
+          },
+          "sourceAuthor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceKind": {
+            "$ref": "#/components/schemas/SourceKind"
+          },
+          "passage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp (UTC)"
+          }
+        },
+        "required": [
+          "id",
+          "user",
+          "sourceTitle",
+          "sourceAuthor",
+          "sourceKind",
+          "passage",
+          "note",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "EncounterInput": {
+        "type": "object",
+        "properties": {
+          "sourceTitle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "sourceAuthor": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "sourceKind": {
+            "default": "book",
+            "$ref": "#/components/schemas/SourceKind"
+          },
+          "passage": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "sourceTitle"
+        ]
+      },
+      "ErrorBody": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "bad_request, unauthorized, forbidden, not_found, conflict, tutor_unavailable or internal."
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "Leaderboard": {
+        "type": "object",
+        "properties": {
+          "weekStartsAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp (UTC)"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardEntry"
+            }
+          }
+        },
+        "required": [
+          "weekStartsAt",
+          "entries"
+        ],
+        "additionalProperties": false
+      },
+      "LeaderboardEntry": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "isMe": {
+            "type": "boolean"
+          },
+          "xpTotal": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "xpThisWeek": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "streakDays": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Consecutive days with earned XP, counting today or yesterday as the latest."
+          },
+          "wordsStudied": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "wordsMastered": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "reviewsCorrect": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "reviewsDue": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "user",
+          "isMe",
+          "xpTotal",
+          "xpThisWeek",
+          "streakDays",
+          "wordsStudied",
+          "wordsMastered",
+          "reviewsCorrect",
+          "reviewsDue"
+        ],
+        "additionalProperties": false
+      },
+      "LearningStage": {
+        "type": "string",
+        "enum": [
+          "STUDYING",
+          "REVIEWING",
+          "MASTERED"
+        ],
+        "description": "STUDYING: writing the five sentences. REVIEWING: in spaced repetition. MASTERED: long, stable interval reached."
+      },
+      "LoginBody": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "client": {
+            "default": "web",
+            "description": "Label for this device's session, e.g. \"android\".",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "Me": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "displayName",
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "Meta": {
+        "type": "object",
+        "properties": {
+          "registrationOpen": {
+            "type": "boolean",
+            "description": "False once both accounts exist."
+          },
+          "tutorAvailable": {
+            "type": "boolean",
+            "description": "Whether AI drafting of word entries and sentence evaluation are configured."
+          }
+        },
+        "required": [
+          "registrationOpen",
+          "tutorAvailable"
+        ],
+        "additionalProperties": false
+      },
+      "Morpheme": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MorphemeKind"
+          },
+          "form": {
+            "type": "string"
+          },
+          "meaning": {
+            "type": "string"
+          },
+          "origin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "relatedWords": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "lemma": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "lemma"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Other words in the collection built from this morpheme."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "form",
+          "meaning",
+          "origin",
+          "relatedWords"
+        ],
+        "additionalProperties": false
+      },
+      "MorphemeInput": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MorphemeKind"
+          },
+          "form": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "meaning": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "origin": {
+            "type": "string",
+            "maxLength": 60
+          }
+        },
+        "required": [
+          "kind",
+          "form",
+          "meaning"
+        ]
+      },
+      "MorphemeKind": {
+        "type": "string",
+        "enum": [
+          "PREFIX",
+          "ROOT",
+          "SUFFIX"
+        ]
+      },
+      "Progress": {
+        "type": "object",
+        "properties": {
+          "userWordId": {
+            "type": "string"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/LearningStage"
+          },
+          "acceptedSentences": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "due": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp (UTC)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Next review time; null until studied."
+          },
+          "reps": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "lapses": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "stabilityDays": {
+            "type": "number",
+            "description": "FSRS memory stability, in days."
+          },
+          "introducedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicUser"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "studiedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp (UTC)"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "masteredAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp (UTC)"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "userWordId",
+          "stage",
+          "acceptedSentences",
+          "due",
+          "reps",
+          "lapses",
+          "stabilityDays",
+          "introducedBy",
+          "studiedAt",
+          "masteredAt"
+        ],
+        "additionalProperties": false
+      },
+      "PublicUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "displayName"
+        ],
+        "additionalProperties": false
+      },
+      "RegisterBody": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 200,
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "password": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 200
+          },
+          "inviteCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "client": {
+            "default": "web",
+            "description": "Label for this device's session, e.g. \"android\".",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "email",
+          "displayName",
+          "password",
+          "inviteCode"
+        ]
+      },
+      "ReviewCard": {
+        "type": "object",
+        "properties": {
+          "userWordId": {
+            "type": "string"
+          },
+          "wordId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ReviewKind"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "DEFINITION_RECALL: the word. WORD_FROM_CONTEXT: a sentence with the word blanked out. SENTENCE: an instruction."
+          },
+          "due": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp (UTC)"
+          },
+          "answer": {
+            "type": "object",
+            "properties": {
+              "lemma": {
+                "type": "string"
+              },
+              "pronunciation": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "partOfSpeech": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "definition": {
+                "type": "string"
+              },
+              "example": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "lemma",
+              "pronunciation",
+              "partOfSpeech",
+              "definition",
+              "example"
+            ],
+            "additionalProperties": false,
+            "description": "Reveal after the user has tried to recall."
+          }
+        },
+        "required": [
+          "userWordId",
+          "wordId",
+          "kind",
+          "prompt",
+          "due",
+          "answer"
+        ],
+        "additionalProperties": false
+      },
+      "ReviewKind": {
+        "type": "string",
+        "enum": [
+          "DEFINITION_RECALL",
+          "WORD_FROM_CONTEXT",
+          "SENTENCE"
+        ]
+      },
+      "ReviewResult": {
+        "type": "object",
+        "properties": {
+          "rating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "progress": {
+            "$ref": "#/components/schemas/Progress"
+          },
+          "xpAwarded": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "evaluation": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "verdict": {
+                    "$ref": "#/components/schemas/SentenceVerdict"
+                  },
+                  "grammarOk": {
+                    "type": "boolean"
+                  },
+                  "usageOk": {
+                    "type": "boolean"
+                  },
+                  "contextOk": {
+                    "type": "boolean"
+                  },
+                  "feedback": {
+                    "type": "string"
+                  },
+                  "suggestion": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "text",
+                  "verdict",
+                  "grammarOk",
+                  "usageOk",
+                  "contextOk",
+                  "feedback",
+                  "suggestion"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "rating",
+          "progress",
+          "xpAwarded",
+          "evaluation"
+        ],
+        "additionalProperties": false
+      },
+      "Sentence": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "slot": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "text": {
+            "type": "string"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/SentenceVerdict"
+          },
+          "grammarOk": {
+            "type": "boolean"
+          },
+          "usageOk": {
+            "type": "boolean"
+          },
+          "contextOk": {
+            "type": "boolean"
+          },
+          "feedback": {
+            "type": "string"
+          },
+          "suggestion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp (UTC)"
+          }
+        },
+        "required": [
+          "id",
+          "slot",
+          "text",
+          "verdict",
+          "grammarOk",
+          "usageOk",
+          "contextOk",
+          "feedback",
+          "suggestion",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "SentenceResult": {
+        "type": "object",
+        "properties": {
+          "sentence": {
+            "$ref": "#/components/schemas/Sentence"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/Progress"
+          },
+          "xpAwarded": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "sentence",
+          "progress",
+          "xpAwarded"
+        ],
+        "additionalProperties": false
+      },
+      "SentenceSlot": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Sentence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "slot",
+          "latest",
+          "attempts"
+        ],
+        "additionalProperties": false
+      },
+      "SentenceVerdict": {
+        "type": "string",
+        "enum": [
+          "ACCEPTED",
+          "NEEDS_REVISION"
+        ]
+      },
+      "SourceKind": {
+        "type": "string",
+        "enum": [
+          "book",
+          "article",
+          "other"
+        ]
+      },
+      "SubmitReviewBody": {
+        "type": "object",
+        "properties": {
+          "userWordId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ReviewKind"
+          },
+          "rating": {
+            "description": "Self-rating: 1 Again, 2 Hard, 3 Good, 4 Easy. Required unless kind is SENTENCE.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "sentence": {
+            "description": "Required when kind is SENTENCE; the tutor's verdict sets the rating.",
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "userWordId",
+          "kind"
+        ]
+      },
+      "SubmitSentenceBody": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "text": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "slot",
+          "text"
+        ]
+      },
+      "UpdateWordBody": {
+        "type": "object",
+        "properties": {
+          "definition": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "pronunciation": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "partOfSpeech": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "etymology": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "relatedForms": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "synonyms": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "antonyms": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "examples": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "difficulty": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "morphemes": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MorphemeInput"
+            }
+          }
+        }
+      },
+      "WordDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "lemma": {
+            "type": "string"
+          },
+          "partOfSpeech": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "definition": {
+            "type": "string"
+          },
+          "difficulty": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "addedBy": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp (UTC)"
+          },
+          "myProgress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Progress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null if you have not started this word."
+          },
+          "partnerStage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LearningStage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pronunciation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "etymology": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "relatedForms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "synonyms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "antonyms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "examples": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "morphemes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Morpheme"
+            }
+          },
+          "encounters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Encounter"
+            }
+          },
+          "sentences": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SentenceSlot"
+            },
+            "description": "Your five sentence slots, in order. Empty if you have not started the word."
+          }
+        },
+        "required": [
+          "id",
+          "lemma",
+          "partOfSpeech",
+          "definition",
+          "difficulty",
+          "addedBy",
+          "createdAt",
+          "myProgress",
+          "partnerStage",
+          "pronunciation",
+          "etymology",
+          "relatedForms",
+          "synonyms",
+          "antonyms",
+          "examples",
+          "morphemes",
+          "encounters",
+          "sentences"
+        ],
+        "additionalProperties": false
+      },
+      "WordList": {
+        "type": "object",
+        "properties": {
+          "words": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WordSummary"
+            }
+          }
+        },
+        "required": [
+          "words"
+        ],
+        "additionalProperties": false
+      },
+      "WordSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "lemma": {
+            "type": "string"
+          },
+          "partOfSpeech": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "definition": {
+            "type": "string"
+          },
+          "difficulty": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "addedBy": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp (UTC)"
+          },
+          "myProgress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Progress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null if you have not started this word."
+          },
+          "partnerStage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LearningStage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "lemma",
+          "partOfSpeech",
+          "definition",
+          "difficulty",
+          "addedBy",
+          "createdAt",
+          "myProgress",
+          "partnerStage"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}
