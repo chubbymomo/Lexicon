@@ -1,7 +1,7 @@
 /** The five-sentence method and spaced-repetition reviews. */
 import type { z } from "zod";
 import type { User } from "@/generated/prisma/client";
-import type { SubmitReviewBody, SubmitSentenceBody } from "../contract";
+import { SENTENCES_PER_WORD, type SubmitReviewBody, type SubmitSentenceBody } from "../contract";
 import { db } from "../db";
 import { badRequest, conflict, notFound } from "../errors";
 import { settle } from "./competition";
@@ -39,7 +39,10 @@ export async function submitSentence(
   if (latestBySlot.get(body.slot)?.verdict === "ACCEPTED") {
     throw conflict(`Sentence ${body.slot} has already been accepted`);
   }
-  const accepted = [...latestBySlot.values()].filter((s) => s.verdict === "ACCEPTED");
+  // Only the current slots count; words begun when more sentences were asked for may have more.
+  const accepted = [...latestBySlot.values()].filter(
+    (s) => s.verdict === "ACCEPTED" && s.slot <= SENTENCES_PER_WORD,
+  );
 
   const evaluation = await evaluateSentence({
     lemma: userWord.word.lemma,
@@ -71,8 +74,8 @@ export async function submitSentence(
     let xpAwarded = 0;
     if (ok) {
       xpAwarded += await awardXp(tx, user.id, "SENTENCE_ACCEPTED", wordId, now);
-      // The fifth accepted sentence completes the study and starts spaced repetition.
-      if (accepted.length + 1 === 5 && userWord.stage === "STUDYING") {
+      // The last accepted sentence completes the study and starts spaced repetition.
+      if (accepted.length + 1 === SENTENCES_PER_WORD && userWord.stage === "STUDYING") {
         await tx.userWord.update({
           where: { id: userWord.id },
           data: { stage: "REVIEWING", studiedAt: now, ...scheduleFirst(now) },
@@ -93,6 +96,32 @@ export async function submitSentence(
   });
   if (ok) await settle(user.id, now);
   return result;
+}
+
+/**
+ * Finish the study of any word that already has enough accepted sentences,
+ * e.g. after the number required was lowered. Safe to run on every start.
+ */
+export async function promoteCompletedStudies(now = new Date()): Promise<number> {
+  const studying = await db.userWord.findMany({
+    where: { stage: "STUDYING" },
+    include: { sentences: { orderBy: { createdAt: "asc" } } },
+  });
+  let promoted = 0;
+  for (const userWord of studying) {
+    const latest = new Map(userWord.sentences.map((s) => [s.slot, s]));
+    const accepted = [...latest.values()].filter((s) => s.verdict === "ACCEPTED").length;
+    if (accepted < SENTENCES_PER_WORD) continue;
+    await db.$transaction(async (tx) => {
+      await tx.userWord.update({
+        where: { id: userWord.id },
+        data: { stage: "REVIEWING", studiedAt: now, ...scheduleFirst(now) },
+      });
+      await awardXp(tx, userWord.userId, "WORD_STUDIED", userWord.wordId, now);
+    });
+    promoted++;
+  }
+  return promoted;
 }
 
 export async function dueReviews(user: User, limit: number, now = new Date()) {

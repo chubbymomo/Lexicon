@@ -31,10 +31,11 @@ function Charts({ stats }: { stats: Stats }) {
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-6 sm:grid-cols-5">
         <Figure value={String(stages.studying)} label="Studying" />
         <Figure value={String(stages.reviewing)} label="Reviewing" />
         <Figure value={String(stages.mastered)} label="Mastered" />
+        <Figure value={String(stages.known)} label="Already known" />
         <Figure
           value={stats.recallRate === null ? "–" : `${Math.round(stats.recallRate * 100)}%`}
           label="Recalled, 30 days"

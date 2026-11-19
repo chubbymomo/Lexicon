@@ -7,14 +7,19 @@
  */
 import { z } from "zod";
 
+/** Accepted sentences needed to finish studying a word. */
+export const SENTENCES_PER_WORD = 3;
+/** Curriculum words a player may have unfinished at once, per curriculum. */
+export const MAX_IN_PROGRESS = 3;
+
 const isoDate = z.string().meta({ format: "date-time", description: "ISO 8601 timestamp (UTC)" });
 
 // --- Shared enums -----------------------------------------------------------
 
-export const LearningStage = z.enum(["STUDYING", "REVIEWING", "MASTERED"]).meta({
+export const LearningStage = z.enum(["STUDYING", "REVIEWING", "MASTERED", "KNOWN"]).meta({
   id: "LearningStage",
   description:
-    "STUDYING: writing the five sentences. REVIEWING: in spaced repetition. MASTERED: long, stable interval reached.",
+    "STUDYING: writing the sentences. REVIEWING: in spaced repetition. MASTERED: long, stable interval reached. KNOWN: already known, passed over in a curriculum and never reviewed.",
 });
 export const MorphemeKind = z.enum(["PREFIX", "ROOT", "SUFFIX"]).meta({ id: "MorphemeKind" });
 export const ReviewKind = z
@@ -23,7 +28,9 @@ export const ReviewKind = z
 export const SentenceVerdict = z
   .enum(["ACCEPTED", "NEEDS_REVISION"])
   .meta({ id: "SentenceVerdict" });
-export const SourceKind = z.enum(["book", "article", "other"]).meta({ id: "SourceKind" });
+export const SourceKind = z
+  .enum(["book", "article", "video", "series", "film", "podcast", "other"])
+  .meta({ id: "SourceKind" });
 
 // --- People -----------------------------------------------------------------
 
@@ -80,7 +87,10 @@ export const Progress = z
   .object({
     userWordId: z.string(),
     stage: LearningStage,
-    acceptedSentences: z.number().int().min(0).max(5),
+    acceptedSentences: z.number().int().min(0),
+    sentencesRequired: z.number().int().meta({
+      description: "Accepted sentences needed to finish studying the word.",
+    }),
     due: isoDate.nullable().meta({ description: "Next review time; null until studied." }),
     reps: z.number().int(),
     lapses: z.number().int(),
@@ -99,11 +109,11 @@ export const WordSummary = z
     definition: z.string(),
     difficulty: z.number().int().min(1).max(5),
     addedBy: PublicUser.nullable().meta({
-      description: "Who added the word; null for words that ship with the curriculum.",
+      description: "Who added the word; null for words that came from a curriculum.",
     }),
-    curriculumPosition: z.number().int().nullable().meta({
-      description: "Place in the shared curriculum (1-based); null for words a player added.",
-    }),
+    curricula: z
+      .array(z.object({ id: z.string(), title: z.string(), position: z.number().int() }))
+      .meta({ description: "Curricula that include the word, with its place in each (1-based)." }),
     createdAt: isoDate,
     myProgress: Progress.nullable().meta({ description: "Null if you have not started this word." }),
     others: z
@@ -141,7 +151,7 @@ export const Encounter = z
 export const Sentence = z
   .object({
     id: z.string(),
-    slot: z.number().int().min(1).max(5),
+    slot: z.number().int().min(1),
     text: z.string(),
     verdict: SentenceVerdict,
     grammarOk: z.boolean(),
@@ -155,7 +165,7 @@ export const Sentence = z
 
 export const SentenceSlot = z
   .object({
-    slot: z.number().int().min(1).max(5),
+    slot: z.number().int().min(1),
     latest: Sentence.nullable(),
     attempts: z.number().int(),
   })
@@ -171,7 +181,7 @@ export const WordDetail = WordSummary.extend({
   morphemes: z.array(Morpheme),
   encounters: z.array(Encounter),
   sentences: z.array(SentenceSlot).meta({
-    description: "Your five sentence slots, in order. Empty if you have not started the word.",
+    description: "Your sentence slots, in order. Empty if you have not started the word.",
   }),
 }).meta({ id: "WordDetail" });
 
@@ -233,7 +243,7 @@ export const UpdateWordBody = z
 export const ListWordsQuery = z.object({
   q: z.string().trim().max(60).optional().meta({ description: "Filter by lemma prefix." }),
   stage: z
-    .enum(["STUDYING", "REVIEWING", "MASTERED", "NOT_STARTED"])
+    .enum(["STUDYING", "REVIEWING", "MASTERED", "KNOWN", "NOT_STARTED"])
     .optional()
     .meta({ description: "Filter by your own stage." }),
 });
@@ -246,33 +256,99 @@ export const IntroduceBody = z
 
 export const UserList = z.object({ users: z.array(PublicUser) }).meta({ id: "UserList" });
 
-// --- Curriculum -------------------------------------------------------------
+// --- Curricula --------------------------------------------------------------
 
-export const Curriculum = z
+export const CurriculumKind = z.enum(["CORE", "SOURCE"]).meta({
+  id: "CurriculumKind",
+  description: "CORE: the built-in dictionary curriculum. SOURCE: words drawn from a video, series, book or other source.",
+});
+
+export const CurriculumWord = z
   .object({
-    total: z.number().int().meta({ description: "Number of words in the curriculum." }),
-    started: z.number().int().meta({ description: "Curriculum words on your list." }),
-    studied: z.number().int().meta({ description: "Curriculum words whose study you finished." }),
-    inProgress: z.array(WordSummary).meta({
-      description: "Curriculum words you have started but not finished studying.",
+    lemma: z.string(),
+    position: z.number().int().meta({ description: "Place in the curriculum, 1-based." }),
+    partOfSpeech: z.string().nullable(),
+    definition: z.string(),
+    context: z.string().nullable().meta({
+      description: "Where the word appears in the source, when known.",
     }),
-    next: WordSummary.nullable().meta({
-      description: "The next word in order that you have not started; null at the end.",
+    wordId: z.string().nullable().meta({
+      description: "The word's id once it is in the collection; null before anyone begins it.",
+    }),
+  })
+  .meta({ id: "CurriculumWord" });
+
+export const CurriculumSummary = z
+  .object({
+    id: z.string(),
+    kind: CurriculumKind,
+    title: z.string(),
+    description: z.string().nullable(),
+    sourceKind: SourceKind.nullable(),
+    createdBy: PublicUser.nullable(),
+    createdAt: isoDate,
+    total: z.number().int().meta({ description: "Words in the curriculum." }),
+    studied: z.number().int().meta({ description: "Words you finished studying." }),
+    known: z.number().int().meta({ description: "Words you marked as already known." }),
+    inProgress: z.array(WordSummary).meta({
+      description: "Words from this curriculum you have begun but not finished.",
+    }),
+    next: CurriculumWord.nullable().meta({
+      description: "The next word in order that you have not begun; null at the end.",
     }),
     canStartNext: z.boolean().meta({
-      description:
-        "False while too many curriculum words are unfinished; finish their five sentences first.",
+      description: `False while ${MAX_IN_PROGRESS} words from this curriculum are unfinished, or at the end.`,
     }),
     maxInProgress: z.number().int(),
     players: z
-      .array(z.object({ user: PublicUser, isMe: z.boolean(), studied: z.number().int() }))
+      .array(
+        z.object({
+          user: PublicUser,
+          isMe: z.boolean(),
+          studied: z.number().int(),
+          known: z.number().int(),
+        }),
+      )
       .meta({ description: "How far every player has come through the same list." }),
   })
-  .meta({ id: "Curriculum" });
+  .meta({ id: "CurriculumSummary" });
+
+export const CurriculumDetail = CurriculumSummary.extend({
+  upcoming: z.array(CurriculumWord).meta({
+    description: "Your next words in order, starting with `next` (up to 10).",
+  }),
+}).meta({ id: "CurriculumDetail" });
+
+export const CurriculumList = z
+  .object({ curricula: z.array(CurriculumSummary) })
+  .meta({ id: "CurriculumList" });
+
+export const CreateCurriculumBody = z
+  .object({
+    title: z.string().trim().min(1).max(120).meta({
+      description: 'The source, e.g. "The Wire, season 1" or "Middlemarch".',
+    }),
+    sourceKind: SourceKind,
+    description: z.string().trim().max(500).optional(),
+    text: z.string().max(500_000).optional().meta({
+      description:
+        "The source's text: subtitles (SRT or WebVTT), a transcript, or prose. Words are taken from it, with the line each appears in. Without text, the tutor suggests words from its own knowledge of the work.",
+    }),
+    wordCount: z.number().int().min(5).max(100).default(25),
+  })
+  .meta({ id: "CreateCurriculumBody" });
+
+export const SkipBody = z
+  .object({
+    lemma: z.string().meta({
+      description: "The word being passed over; must be your current `next` word.",
+    }),
+  })
+  .meta({ id: "SkipBody" });
 
 export const SubmitSentenceBody = z
   .object({
-    slot: z.number().int().min(1).max(5),
+    slot: z.number().int().min(1).max(SENTENCES_PER_WORD),
     text: z.string().trim().min(3).max(600),
   })
   .meta({ id: "SubmitSentenceBody" });
@@ -409,6 +485,7 @@ export const Stats = z
       studying: z.number().int(),
       reviewing: z.number().int(),
       mastered: z.number().int(),
+      known: z.number().int(),
     }),
     recallRate: z.number().nullable().meta({
       description:
@@ -594,9 +671,9 @@ export const endpoints = {
     method: "POST",
     path: "/words/{id}/sentences",
     tag: "Study",
-    summary: "Submit one of your five sentences for evaluation",
+    summary: "Submit one of your sentences for evaluation",
     description:
-      "The tutor evaluates grammar, usage and context. Resubmit the same slot to revise. When all five slots are accepted the word moves to REVIEWING and its first review is scheduled.",
+      "The tutor evaluates grammar, usage and context. Resubmit the same slot to revise. When every slot (`sentencesRequired`) is accepted the word moves to REVIEWING and its first review is scheduled.",
     auth: true,
     body: SubmitSentenceBody,
     response: SentenceResult,
@@ -621,25 +698,64 @@ export const endpoints = {
     body: SubmitReviewBody,
     response: ReviewResult,
   }),
-  curriculum: endpoint({
+  listCurricula: endpoint({
     method: "GET",
-    path: "/curriculum",
-    tag: "Curriculum",
-    summary: "Your place in the shared curriculum",
+    path: "/curricula",
+    tag: "Curricula",
+    summary: "Every curriculum, with your place in each",
     description:
-      "The curriculum is a fixed, ordered list of words that every player works through in the same order.",
+      "A curriculum is an ordered list of words that every player works through in the same order. There is always the core curriculum; players can add more from sources.",
     auth: true,
-    response: Curriculum,
+    response: CurriculumList,
+  }),
+  createCurriculum: endpoint({
+    method: "POST",
+    path: "/curricula",
+    tag: "Curricula",
+    summary: "Make a curriculum from a video, series, book or other source",
+    description:
+      "With `text`, words are found in it and the tutor chooses the best (without the tutor, the rarest are taken), in the order they appear. Without `text`, the tutor suggests words from its knowledge of the work (503 `tutor_unavailable` if not configured; 409 if it does not know the work). Can take up to a minute.",
+    auth: true,
+    body: CreateCurriculumBody,
+    response: CurriculumDetail,
+  }),
+  getCurriculum: endpoint({
+    method: "GET",
+    path: "/curricula/{id}",
+    tag: "Curricula",
+    summary: "A curriculum, with your next words",
+    auth: true,
+    response: CurriculumDetail,
+  }),
+  deleteCurriculum: endpoint({
+    method: "DELETE",
+    path: "/curricula/{id}",
+    tag: "Curricula",
+    summary: "Remove a curriculum you made",
+    description:
+      "Only its creator can remove it, and never the core curriculum. Words already begun stay in everyone's collection.",
+    auth: true,
   }),
   startNextCurriculumWord: endpoint({
     method: "POST",
-    path: "/curriculum/next",
-    tag: "Curriculum",
-    summary: "Begin the next curriculum word",
+    path: "/curricula/{id}/next",
+    tag: "Curricula",
+    summary: "Begin your next word in a curriculum",
     description:
-      "Adds the next word in order to your study list. 409 if `canStartNext` is false or the curriculum is finished.",
+      "Adds the word to the collection if needed (the tutor fills in its etymology, which can take a few seconds) and to your study list. 409 if `canStartNext` is false.",
     auth: true,
     response: WordDetail,
+  }),
+  skipCurriculumWord: endpoint({
+    method: "POST",
+    path: "/curricula/{id}/skip",
+    tag: "Curricula",
+    summary: "Pass over your next word because you already know it",
+    description:
+      "Marks the word KNOWN for you; it is never reviewed and earns no XP. 409 if `lemma` is not your next word.",
+    auth: true,
+    body: SkipBody,
+    response: CurriculumDetail,
   }),
   challenges: endpoint({
     method: "GET",

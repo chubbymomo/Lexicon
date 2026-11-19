@@ -26,6 +26,7 @@ model User {
   xpEvents    XpEvent[]
   introduced  UserWord[]  @relation("introducedBy")
   achievements Achievement[]
+  tracks       Track[]
 }
 
 /// An API token. Only the SHA-256 of the token is stored.
@@ -63,11 +64,10 @@ model Word {
   examples      String[]
   /// 1 (common) to 5 (rare or difficult).
   difficulty    Int      @default(3)
-  /// Null for words that ship with the curriculum.
+  /// Null for words that came from the dictionary through a curriculum.
   addedById     String?
-  /// Place in the shared curriculum every player works through in the same
-  /// order. Null for words a player added themselves.
-  curriculumPosition Int? @unique
+  /// When the tutor filled in etymology, construction and pronunciation.
+  enrichedAt    DateTime?
   createdAt     DateTime @default(now())
 
   addedBy    User?       @relation(fields: [addedById], references: [id])
@@ -141,6 +141,8 @@ enum LearningStage {
   REVIEWING
   /// Long, stable review interval reached.
   MASTERED
+  /// Already known; passed over in a curriculum and never reviewed.
+  KNOWN
 }
 
 /// FSRS card state, mirroring ts-fsrs `State`.
@@ -274,4 +276,70 @@ model Achievement {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, code])
+}
+
+// ---------------------------------------------------------------------------
+// The dictionary and curricula
+// ---------------------------------------------------------------------------
+
+/// The reference dictionary (WordNet), loaded from prisma/data. A word joins
+/// the collection (`Word`) when someone first studies it.
+model DictionaryEntry {
+  lemma        String   @id
+  partOfSpeech String
+  definition   String
+  synonyms     String[]
+  antonyms     String[]
+  examples     String[]
+  /// How common the word is (Zipf scale: 7 is "the", 1 is very rare).
+  zipf         Float
+}
+
+/// An irregular inflection and its dictionary form, e.g. "ran" -> "run".
+model WordForm {
+  form  String @id
+  lemma String
+}
+
+enum TrackKind {
+  /// The built-in curriculum drawn from the dictionary.
+  CORE
+  /// Words drawn from a video, series, book or other source.
+  SOURCE
+}
+
+/// An ordered list of words that every player works through in the same order.
+model Track {
+  id          String    @id @default(cuid())
+  kind        TrackKind
+  title       String
+  description String?
+  /// "video", "series", "film", "book", "article", "podcast" or "other".
+  sourceKind  String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  createdBy User?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  items     TrackItem[]
+}
+
+model TrackItem {
+  trackId  String
+  /// 1-based order of study.
+  position Int
+  lemma    String
+  /// Where the word appears in the source, when known.
+  context  String?
+
+  track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@id([trackId, position])
+  @@unique([trackId, lemma])
+  @@index([lemma])
+}
+
+/// Small key-value settings, e.g. the version of the loaded dictionary.
+model Setting {
+  key   String @id
+  value String
 }

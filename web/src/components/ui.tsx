@@ -72,6 +72,7 @@ const stageText: Record<LearningStage | "NOT_STARTED", string> = {
   STUDYING: "Studying",
   REVIEWING: "Reviewing",
   MASTERED: "Mastered",
+  KNOWN: "Known",
 };
 
 export function Stage({ stage }: { stage: LearningStage | null }) {

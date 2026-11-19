@@ -8,7 +8,7 @@ The goal is not simply to memorize definitions, but to understand words deeply: 
 
 ### 1. Vocabulary discovery and study
 
-Users work through a shared curriculum of words, the same words in the same order for everyone, and add words they encounter while reading. Each word has a study page with:
+Users work through curricula, ordered word lists that everyone takes in the same order: a core curriculum of about 14,000 words drawn from the WordNet dictionary, and lists the group makes from the videos, series, books and articles they are enjoying (from subtitles or a transcript, or from a title alone with the AI tutor). They can also add words they encounter while reading. Each word has a study page with:
 
 - Definition and pronunciation
 - Etymology and historical origins
@@ -17,9 +17,9 @@ Users work through a shared curriculum of words, the same words in the same orde
 - Synonyms, antonyms, and example usages
 - Connections to other words with similar linguistic roots
 
-### 2. Five-sentence learning method
+### 2. Three-sentence learning method
 
-After studying a word, the user writes five original sentences demonstrating their understanding. An AI tutor evaluates each sentence for grammatical correctness, contextual appropriateness, and accurate usage of the word. It gives constructive feedback, explains mistakes, and encourages revisions.
+After studying a word, the user writes three original sentences demonstrating their understanding. An AI tutor evaluates each sentence for grammatical correctness, contextual appropriateness, and accurate usage of the word. It gives constructive feedback, explains mistakes, and encourages revisions.
 
 ### 3. Long-term spaced repetition
 
@@ -76,7 +76,7 @@ Edit `.env`: set `POSTGRES_PASSWORD` and `LEXICON_INVITE_CODE`, and `ANTHROPIC_A
 docker compose up -d --build
 ```
 
-Lexicon is then at `http://<your-server>:3000` (change the port with `LEXICON_PORT`). On each start the app applies database migrations and loads the curriculum, so there is no separate setup step. Each person opens the site, chooses "Create an account" and enters the invite code.
+Lexicon is then at `http://<your-server>:3000` (change the port with `LEXICON_PORT`). On each start the app applies database migrations and loads the dictionary and core curriculum (about 5 seconds the first time, then skipped), so there is no separate setup step. Each person opens the site, chooses "Create an account" and enters the invite code.
 
 - **Updating:** `git pull`, then `docker compose up -d --build` again. Data is kept.
 - **Your data** lives in the `db-data` Docker volume. Back it up with `docker compose exec db pg_dump -U lexicon lexicon > backup.sql`. `docker compose down -v` deletes it.

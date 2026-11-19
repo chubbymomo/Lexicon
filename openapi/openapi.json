@@ -248,6 +248,7 @@
                 "STUDYING",
                 "REVIEWING",
                 "MASTERED",
+                "KNOWN",
                 "NOT_STARTED"
               ]
             }
@@ -644,8 +645,8 @@
         "tags": [
           "Study"
         ],
-        "summary": "Submit one of your five sentences for evaluation",
-        "description": "The tutor evaluates grammar, usage and context. Resubmit the same slot to revise. When all five slots are accepted the word moves to REVIEWING and its first review is scheduled.",
+        "summary": "Submit one of your sentences for evaluation",
+        "description": "The tutor evaluates grammar, usage and context. Resubmit the same slot to revise. When every slot (`sentencesRequired`) is accepted the word moves to REVIEWING and its first review is scheduled.",
         "parameters": [
           {
             "name": "id",
@@ -821,21 +822,76 @@
         ]
       }
     },
-    "/curriculum": {
+    "/curricula": {
       "get": {
-        "operationId": "curriculum",
+        "operationId": "listCurricula",
         "tags": [
-          "Curriculum"
+          "Curricula"
         ],
-        "summary": "Your place in the shared curriculum",
-        "description": "The curriculum is a fixed, ordered list of words that every player works through in the same order.",
+        "summary": "Every curriculum, with your place in each",
+        "description": "A curriculum is an ordered list of words that every player works through in the same order. There is always the core curriculum; players can add more from sources.",
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Curriculum"
+                  "$ref": "#/components/schemas/CurriculumList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createCurriculum",
+        "tags": [
+          "Curricula"
+        ],
+        "summary": "Make a curriculum from a video, series, book or other source",
+        "description": "With `text`, words are found in it and the tutor chooses the best (without the tutor, the rarest are taken), in the order they appear. Without `text`, the tutor suggests words from its knowledge of the work (503 `tutor_unavailable` if not configured; 409 if it does not know the work). Can take up to a minute.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCurriculumBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurriculumDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -858,14 +914,108 @@
         ]
       }
     },
-    "/curriculum/next": {
+    "/curricula/{id}": {
+      "get": {
+        "operationId": "getCurriculum",
+        "tags": [
+          "Curricula"
+        ],
+        "summary": "A curriculum, with your next words",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurriculumDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteCurriculum",
+        "tags": [
+          "Curricula"
+        ],
+        "summary": "Remove a curriculum you made",
+        "description": "Only its creator can remove it, and never the core curriculum. Words already begun stay in everyone's collection.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/curricula/{id}/next": {
       "post": {
         "operationId": "startNextCurriculumWord",
         "tags": [
-          "Curriculum"
+          "Curricula"
         ],
-        "summary": "Begin the next curriculum word",
-        "description": "Adds the next word in order to your study list. 409 if `canStartNext` is false or the curriculum is finished.",
+        "summary": "Begin your next word in a curriculum",
+        "description": "Adds the word to the collection if needed (the tutor fills in its etymology, which can take a few seconds) and to your study list. 409 if `canStartNext` is false.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -873,6 +1023,73 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WordDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/curricula/{id}/skip": {
+      "post": {
+        "operationId": "skipCurriculumWord",
+        "tags": [
+          "Curricula"
+        ],
+        "summary": "Pass over your next word because you already know it",
+        "description": "Marks the word KNOWN for you; it is never reviewed and earns no XP. 409 if `lemma` is not your next word.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkipBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurriculumDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -1251,6 +1468,39 @@
         ],
         "additionalProperties": false
       },
+      "CreateCurriculumBody": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "The source, e.g. \"The Wire, season 1\" or \"Middlemarch\"."
+          },
+          "sourceKind": {
+            "$ref": "#/components/schemas/SourceKind"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "text": {
+            "description": "The source's text: subtitles (SRT or WebVTT), a transcript, or prose. Words are taken from it, with the line each appears in. Without text, the tutor suggests words from its own knowledge of the work.",
+            "type": "string",
+            "maxLength": 500000
+          },
+          "wordCount": {
+            "default": 25,
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "title",
+          "sourceKind"
+        ]
+      },
       "CreateWordBody": {
         "type": "object",
         "properties": {
@@ -1339,48 +1589,88 @@
           "lemma"
         ]
       },
-      "Curriculum": {
+      "CurriculumDetail": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CurriculumKind"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceKind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicUser"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp (UTC)"
+          },
           "total": {
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991,
-            "description": "Number of words in the curriculum."
-          },
-          "started": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991,
-            "description": "Curriculum words on your list."
+            "description": "Words in the curriculum."
           },
           "studied": {
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991,
-            "description": "Curriculum words whose study you finished."
+            "description": "Words you finished studying."
+          },
+          "known": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Words you marked as already known."
           },
           "inProgress": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/WordSummary"
             },
-            "description": "Curriculum words you have started but not finished studying."
+            "description": "Words from this curriculum you have begun but not finished."
           },
           "next": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/WordSummary"
+                "$ref": "#/components/schemas/CurriculumWord"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The next word in order that you have not started; null at the end."
+            "description": "The next word in order that you have not begun; null at the end."
           },
           "canStartNext": {
             "type": "boolean",
-            "description": "False while too many curriculum words are unfinished; finish their five sentences first."
+            "description": "False while 3 words from this curriculum are unfinished, or at the end."
           },
           "maxInProgress": {
             "type": "integer",
@@ -1402,12 +1692,189 @@
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
+                },
+                "known": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
                 }
               },
               "required": [
                 "user",
                 "isMe",
-                "studied"
+                "studied",
+                "known"
+              ],
+              "additionalProperties": false
+            },
+            "description": "How far every player has come through the same list."
+          },
+          "upcoming": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurriculumWord"
+            },
+            "description": "Your next words in order, starting with `next` (up to 10)."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "description",
+          "sourceKind",
+          "createdBy",
+          "createdAt",
+          "total",
+          "studied",
+          "known",
+          "inProgress",
+          "next",
+          "canStartNext",
+          "maxInProgress",
+          "players",
+          "upcoming"
+        ],
+        "additionalProperties": false
+      },
+      "CurriculumKind": {
+        "type": "string",
+        "enum": [
+          "CORE",
+          "SOURCE"
+        ],
+        "description": "CORE: the built-in dictionary curriculum. SOURCE: words drawn from a video, series, book or other source."
+      },
+      "CurriculumList": {
+        "type": "object",
+        "properties": {
+          "curricula": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurriculumSummary"
+            }
+          }
+        },
+        "required": [
+          "curricula"
+        ],
+        "additionalProperties": false
+      },
+      "CurriculumSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CurriculumKind"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceKind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicUser"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp (UTC)"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Words in the curriculum."
+          },
+          "studied": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Words you finished studying."
+          },
+          "known": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Words you marked as already known."
+          },
+          "inProgress": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WordSummary"
+            },
+            "description": "Words from this curriculum you have begun but not finished."
+          },
+          "next": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CurriculumWord"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The next word in order that you have not begun; null at the end."
+          },
+          "canStartNext": {
+            "type": "boolean",
+            "description": "False while 3 words from this curriculum are unfinished, or at the end."
+          },
+          "maxInProgress": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "players": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "user": {
+                  "$ref": "#/components/schemas/PublicUser"
+                },
+                "isMe": {
+                  "type": "boolean"
+                },
+                "studied": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "known": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "user",
+                "isMe",
+                "studied",
+                "known"
               ],
               "additionalProperties": false
             },
@@ -1415,14 +1882,67 @@
           }
         },
         "required": [
+          "id",
+          "kind",
+          "title",
+          "description",
+          "sourceKind",
+          "createdBy",
+          "createdAt",
           "total",
-          "started",
           "studied",
+          "known",
           "inProgress",
           "next",
           "canStartNext",
           "maxInProgress",
           "players"
+        ],
+        "additionalProperties": false
+      },
+      "CurriculumWord": {
+        "type": "object",
+        "properties": {
+          "lemma": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Place in the curriculum, 1-based."
+          },
+          "partOfSpeech": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "definition": {
+            "type": "string"
+          },
+          "context": {
+            "description": "Where the word appears in the source, when known.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "wordId": {
+            "description": "The word's id once it is in the collection; null before anyone begins it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "lemma",
+          "position",
+          "partOfSpeech",
+          "definition",
+          "context",
+          "wordId"
         ],
         "additionalProperties": false
       },
@@ -1651,9 +2171,10 @@
         "enum": [
           "STUDYING",
           "REVIEWING",
-          "MASTERED"
+          "MASTERED",
+          "KNOWN"
         ],
-        "description": "STUDYING: writing the five sentences. REVIEWING: in spaced repetition. MASTERED: long, stable interval reached."
+        "description": "STUDYING: writing the sentences. REVIEWING: in spaced repetition. MASTERED: long, stable interval reached. KNOWN: already known, passed over in a curriculum and never reviewed."
       },
       "LoginBody": {
         "type": "object",
@@ -1816,7 +2337,13 @@
           "acceptedSentences": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 5
+            "maximum": 9007199254740991
+          },
+          "sentencesRequired": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Accepted sentences needed to finish studying the word."
           },
           "due": {
             "anyOf": [
@@ -1884,6 +2411,7 @@
           "userWordId",
           "stage",
           "acceptedSentences",
+          "sentencesRequired",
           "due",
           "reps",
           "lapses",
@@ -2107,7 +2635,7 @@
           "slot": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 5
+            "maximum": 9007199254740991
           },
           "text": {
             "type": "string"
@@ -2181,7 +2709,7 @@
           "slot": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 5
+            "maximum": 9007199254740991
           },
           "latest": {
             "anyOf": [
@@ -2213,11 +2741,27 @@
           "NEEDS_REVISION"
         ]
       },
+      "SkipBody": {
+        "type": "object",
+        "properties": {
+          "lemma": {
+            "type": "string",
+            "description": "The word being passed over; must be your current `next` word."
+          }
+        },
+        "required": [
+          "lemma"
+        ]
+      },
       "SourceKind": {
         "type": "string",
         "enum": [
           "book",
           "article",
+          "video",
+          "series",
+          "film",
+          "podcast",
           "other"
         ]
       },
@@ -2244,12 +2788,18 @@
                 "type": "integer",
                 "minimum": -9007199254740991,
                 "maximum": 9007199254740991
+              },
+              "known": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
               }
             },
             "required": [
               "studying",
               "reviewing",
-              "mastered"
+              "mastered",
+              "known"
             ],
             "additionalProperties": false
           },
@@ -2392,7 +2942,7 @@
           "slot": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 5
+            "maximum": 3
           },
           "text": {
             "type": "string",
@@ -2522,20 +3072,33 @@
                 "type": "null"
               }
             ],
-            "description": "Who added the word; null for words that ship with the curriculum."
+            "description": "Who added the word; null for words that came from a curriculum."
           },
-          "curriculumPosition": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": -9007199254740991,
-                "maximum": 9007199254740991
+          "curricula": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "position": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
               },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Place in the shared curriculum (1-based); null for words a player added."
+              "required": [
+                "id",
+                "title",
+                "position"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Curricula that include the word, with its place in each (1-based)."
           },
           "createdAt": {
             "type": "string",
@@ -2626,7 +3189,7 @@
             "items": {
               "$ref": "#/components/schemas/SentenceSlot"
             },
-            "description": "Your five sentence slots, in order. Empty if you have not started the word."
+            "description": "Your sentence slots, in order. Empty if you have not started the word."
           }
         },
         "required": [
@@ -2636,7 +3199,7 @@
           "definition",
           "difficulty",
           "addedBy",
-          "curriculumPosition",
+          "curricula",
           "createdAt",
           "myProgress",
           "others",
@@ -2699,20 +3262,33 @@
                 "type": "null"
               }
             ],
-            "description": "Who added the word; null for words that ship with the curriculum."
+            "description": "Who added the word; null for words that came from a curriculum."
           },
-          "curriculumPosition": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": -9007199254740991,
-                "maximum": 9007199254740991
+          "curricula": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "position": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
               },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Place in the shared curriculum (1-based); null for words a player added."
+              "required": [
+                "id",
+                "title",
+                "position"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Curricula that include the word, with its place in each (1-based)."
           },
           "createdAt": {
             "type": "string",
@@ -2758,7 +3334,7 @@
           "definition",
           "difficulty",
           "addedBy",
-          "curriculumPosition",
+          "curricula",
           "createdAt",
           "myProgress",
           "others"

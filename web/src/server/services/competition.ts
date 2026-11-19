@@ -176,7 +176,7 @@ const achievementDefs: {
   { code: "streak-100", title: "A hundred days", description: "Study a hundred days running.", target: 100, of: "streak" },
   { code: "recalled-100", title: "A hundred recollections", description: "Recall 100 reviews correctly.", target: 100, of: "recalled" },
   { code: "recalled-500", title: "Five hundred recollections", description: "Recall 500 reviews correctly.", target: 500, of: "recalled" },
-  { code: "curriculum-25", title: "Twenty-five down", description: "Finish studying 25 curriculum words.", target: 25, of: "curriculum" },
+  { code: "curriculum-25", title: "Twenty-five down", description: "Finish studying 25 words from the curricula.", target: 25, of: "curriculum" },
   { code: "added-10", title: "Word collector", description: "Add 10 words of your own to the collection.", target: 10, of: "added" },
   { code: "introduced-1", title: "A word between friends", description: "Introduce a word to another player.", target: 1, of: "introduced" },
   { code: "encounters-5", title: "Marginalia", description: "Record 5 words met in your reading.", target: 5, of: "encounters" },
@@ -193,9 +193,12 @@ async function tally(userId: string, now: Date): Promise<Tally> {
       db.word.count({ where: { addedById: userId } }),
       db.userWord.count({ where: { introducedById: userId } }),
       db.encounter.count({ where: { userId } }),
-      db.userWord.count({
-        where: { userId, studiedAt: { not: null }, word: { curriculumPosition: { not: null } } },
-      }),
+      db.$queryRaw<{ n: bigint }[]>`
+        SELECT count(*) AS n FROM "UserWord" uw JOIN "Word" w ON w.id = uw."wordId"
+        WHERE uw."userId" = ${userId} AND uw."studiedAt" IS NOT NULL
+          AND EXISTS (SELECT 1 FROM "TrackItem" ti WHERE ti.lemma = w.lemma)`.then((r) =>
+        Number(r[0].n),
+      ),
     ]);
   return {
     studied,
@@ -329,6 +332,7 @@ export async function stats(userId: string, now = new Date()) {
       studying: count("STUDYING"),
       reviewing: count("REVIEWING"),
       mastered: count("MASTERED"),
+      known: count("KNOWN"),
     },
     recallRate: reviews.length ? recalled / reviews.length : null,
     weeks,

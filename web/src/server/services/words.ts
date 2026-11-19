@@ -1,18 +1,20 @@
 /** The shared vocabulary collection and each word's study page. */
 import type { z } from "zod";
 import type { Prisma, User } from "@/generated/prisma/client";
-import type {
-  CreateWordBody,
-  EncounterInput,
-  ListWordsQuery,
-  MorphemeInput,
-  UpdateWordBody,
+import {
+  SENTENCES_PER_WORD,
+  type CreateWordBody,
+  type EncounterInput,
+  type ListWordsQuery,
+  type MorphemeInput,
+  type UpdateWordBody,
 } from "../contract";
 import { db } from "../db";
 import { conflict, notFound } from "../errors";
 import { settle } from "./competition";
+import { difficultyFromZipf, lookup } from "./dictionary";
 import { awardXp } from "./progress";
-import { draftEntry } from "./tutor";
+import { draftEntry, enrichEntry, tutorAvailable } from "./tutor";
 
 type Tx = Prisma.TransactionClient;
 
@@ -30,9 +32,9 @@ const progressInclude = {
 
 type UserWordWithSentences = Prisma.UserWordGetPayload<{ include: typeof progressInclude }>;
 
-/** The latest attempt in each of the five slots. */
+/** The latest attempt in each sentence slot. */
 function slots(userWord: UserWordWithSentences) {
-  return [1, 2, 3, 4, 5].map((slot) => {
+  return Array.from({ length: SENTENCES_PER_WORD }, (_, i) => i + 1).map((slot) => {
     const attempts = userWord.sentences.filter((s) => s.slot === slot);
     const latest = attempts.at(-1) ?? null;
     return {
@@ -48,6 +50,7 @@ export function serializeProgress(userWord: UserWordWithSentences) {
     userWordId: userWord.id,
     stage: userWord.stage,
     acceptedSentences: slots(userWord).filter((s) => s.latest?.verdict === "ACCEPTED").length,
+    sentencesRequired: SENTENCES_PER_WORD,
     due: iso(userWord.due),
     reps: userWord.reps,
     lapses: userWord.lapses,
@@ -65,7 +68,36 @@ const summaryInclude = {
 
 type WordForSummary = Prisma.WordGetPayload<{ include: typeof summaryInclude }>;
 
-function serializeSummary(word: WordForSummary, userId: string) {
+type CurriculumRef = { id: string; title: string; position: number };
+
+/** The curricula each of these words belongs to, keyed by lemma. */
+export async function curriculaFor(lemmas: string[]): Promise<Map<string, CurriculumRef[]>> {
+  const items = lemmas.length
+    ? await db.trackItem.findMany({
+        where: { lemma: { in: lemmas } },
+        include: { track: { select: { title: true, kind: true } } },
+      })
+    : [];
+  const map = new Map<string, CurriculumRef[]>();
+  // The core curriculum first, then the others by name.
+  items.sort(
+    (a, b) =>
+      Number(a.track.kind !== "CORE") - Number(b.track.kind !== "CORE") ||
+      a.track.title.localeCompare(b.track.title),
+  );
+  for (const item of items) {
+    const list = map.get(item.lemma) ?? [];
+    list.push({ id: item.trackId, title: item.track.title, position: item.position });
+    map.set(item.lemma, list);
+  }
+  return map;
+}
+
+export function serializeSummary(
+  word: WordForSummary,
+  userId: string,
+  curricula: Map<string, CurriculumRef[]>,
+) {
   const mine = word.userWords.find((uw) => uw.userId === userId);
   return {
     id: word.id,
@@ -74,7 +106,7 @@ function serializeSummary(word: WordForSummary, userId: string) {
     definition: word.definition,
     difficulty: word.difficulty,
     addedBy: word.addedBy && publicUser(word.addedBy),
-    curriculumPosition: word.curriculumPosition,
+    curricula: curricula.get(word.lemma) ?? [],
     createdAt: word.createdAt.toISOString(),
     myProgress: mine ? serializeProgress(mine) : null,
     others: word.userWords
@@ -99,7 +131,8 @@ export async function listWords(user: User, query: z.output<typeof ListWordsQuer
     include: summaryInclude,
     orderBy: { lemma: "asc" },
   });
-  return { words: words.map((w) => serializeSummary(w, user.id)) };
+  const curricula = await curriculaFor(words.map((w) => w.lemma));
+  return { words: words.map((w) => serializeSummary(w, user.id, curricula)) };
 }
 
 export async function wordDetail(user: User, wordId: string) {
@@ -126,7 +159,7 @@ export async function wordDetail(user: User, wordId: string) {
   if (!word) throw notFound("Word");
   const mine = word.userWords.find((uw) => uw.userId === user.id);
   return {
-    ...serializeSummary(word, user.id),
+    ...serializeSummary(word, user.id, await curriculaFor([word.lemma])),
     pronunciation: word.pronunciation,
     etymology: word.etymology,
     relatedForms: word.relatedForms,
@@ -148,7 +181,7 @@ export async function wordDetail(user: User, wordId: string) {
       user: publicUser(e.user),
       sourceTitle: e.sourceTitle,
       sourceAuthor: e.sourceAuthor,
-      sourceKind: e.sourceKind as "book" | "article" | "other",
+      sourceKind: e.sourceKind as z.output<typeof EncounterInput>["sourceKind"],
       passage: e.passage,
       note: e.note,
       createdAt: e.createdAt.toISOString(),
@@ -180,49 +213,153 @@ async function setMorphemes(tx: Tx, wordId: string, morphemes: z.output<typeof M
 
 const emptyToNull = (s: string | undefined) => s || null;
 
+/**
+ * Fill in what a word's entry lacks (etymology, construction, pronunciation,
+ * examples) with the tutor. Best effort: without the tutor, or if it fails, the
+ * word keeps its dictionary entry.
+ */
+export async function enrichIfNeeded(wordId: string): Promise<void> {
+  const word = await db.word.findUnique({
+    where: { id: wordId },
+    include: { morphemes: { select: { morphemeId: true } } },
+  });
+  if (!word || word.enrichedAt || !tutorAvailable()) return;
+  try {
+    const extra = await enrichEntry({
+      lemma: word.lemma,
+      partOfSpeech: word.partOfSpeech,
+      definition: word.definition,
+    });
+    await db.$transaction(async (tx) => {
+      await tx.word.update({
+        where: { id: wordId },
+        data: {
+          pronunciation: word.pronunciation ?? emptyToNull(extra.pronunciation),
+          etymology: word.etymology ?? emptyToNull(extra.etymology),
+          relatedForms: word.relatedForms.length ? word.relatedForms : extra.relatedForms,
+          examples: [...word.examples, ...extra.examples]
+            .filter((e, i, all) => all.indexOf(e) === i)
+            .slice(0, 5),
+          difficulty: Math.min(5, Math.max(1, extra.difficulty || word.difficulty)),
+          enrichedAt: new Date(),
+        },
+      });
+      if (!word.morphemes.length) await setMorphemes(tx, wordId, extra.morphemes);
+    });
+  } catch (error) {
+    console.error(`Could not enrich "${word.lemma}"`, error);
+  }
+}
+
+/**
+ * The collection's entry for a dictionary word, created from the dictionary if
+ * nobody has studied it yet. Null if the dictionary does not know the word.
+ */
+export async function wordFromDictionary(
+  lemma: string,
+  addedById: string | null = null,
+): Promise<{ id: string; lemma: string; created: boolean } | null> {
+  const existing = await db.word.findUnique({ where: { lemma } });
+  if (existing) return { id: existing.id, lemma, created: false };
+  const entry = await lookup(lemma);
+  if (!entry) return null;
+  const again = await db.word.findUnique({ where: { lemma: entry.lemma } });
+  if (again) return { id: again.id, lemma: entry.lemma, created: false };
+  const word = await db.word.upsert({
+    where: { lemma: entry.lemma },
+    update: {},
+    create: {
+      lemma: entry.lemma,
+      partOfSpeech: entry.partOfSpeech,
+      definition: entry.definition,
+      synonyms: entry.synonyms,
+      antonyms: entry.antonyms,
+      examples: entry.examples,
+      difficulty: difficultyFromZipf(entry.zipf),
+      relatedForms: [],
+      addedById,
+    },
+  });
+  return { id: word.id, lemma: entry.lemma, created: true };
+}
+
+const alreadyThere = (lemma: string) => conflict(`"${lemma}" is already in the collection`);
+
 export async function createWord(user: User, body: z.output<typeof CreateWordBody>) {
   let lemma = body.lemma.toLowerCase().replace(/\s+/g, " ");
-  if (await db.word.findUnique({ where: { lemma } })) {
-    throw conflict(`"${lemma}" is already in the collection`);
-  }
+  if (await db.word.findUnique({ where: { lemma } })) throw alreadyThere(lemma);
 
-  let entry: Omit<z.output<typeof UpdateWordBody>, "definition"> & { definition: string };
+  let wordId: string;
   if (body.definition) {
-    entry = { ...body, definition: body.definition };
+    const entry = { ...body, definition: body.definition };
+    wordId = await db.$transaction(async (tx) => {
+      const word = await tx.word.create({
+        data: {
+          lemma,
+          definition: entry.definition,
+          pronunciation: emptyToNull(entry.pronunciation),
+          partOfSpeech: emptyToNull(entry.partOfSpeech),
+          etymology: emptyToNull(entry.etymology),
+          relatedForms: entry.relatedForms ?? [],
+          synonyms: entry.synonyms ?? [],
+          antonyms: entry.antonyms ?? [],
+          examples: entry.examples ?? [],
+          difficulty: entry.difficulty ?? 3,
+          addedById: user.id,
+        },
+      });
+      await setMorphemes(tx, word.id, entry.morphemes ?? []);
+      return word.id;
+    });
   } else {
-    const drafted = await draftEntry(lemma);
-    if (!drafted.isEnglishWord) {
-      throw conflict(`The tutor does not recognise "${lemma}" as an English word`);
+    // The dictionary first; the tutor drafts an entry only for words it lacks.
+    const entry = await lookup(lemma);
+    if (entry) {
+      lemma = entry.lemma;
+      if (await db.word.findUnique({ where: { lemma } })) throw alreadyThere(lemma);
+      wordId = (await wordFromDictionary(lemma, user.id))!.id;
+      await enrichIfNeeded(wordId);
+    } else {
+      const drafted = await draftEntry(lemma);
+      if (!drafted.isEnglishWord) {
+        throw conflict(`"${lemma}" is not in the dictionary, and the tutor does not recognise it`);
+      }
+      // The tutor may normalise the headword ("ran" to "run"); re-check for duplicates.
+      lemma = drafted.lemma.trim().toLowerCase() || lemma;
+      if (await db.word.findUnique({ where: { lemma } })) throw alreadyThere(lemma);
+      wordId = await db.$transaction(async (tx) => {
+        const word = await tx.word.create({
+          data: {
+            lemma,
+            definition: drafted.definition,
+            pronunciation: emptyToNull(drafted.pronunciation),
+            partOfSpeech: emptyToNull(drafted.partOfSpeech),
+            etymology: emptyToNull(drafted.etymology),
+            relatedForms: drafted.relatedForms,
+            synonyms: drafted.synonyms,
+            antonyms: drafted.antonyms,
+            examples: drafted.examples,
+            difficulty: Math.min(5, Math.max(1, drafted.difficulty)),
+            enrichedAt: new Date(),
+            addedById: user.id,
+          },
+        });
+        await setMorphemes(tx, word.id, drafted.morphemes);
+        return word.id;
+      });
     }
-    // The tutor may normalise the headword ("ran" to "run"); re-check for duplicates.
-    lemma = drafted.lemma.trim().toLowerCase() || lemma;
-    if (await db.word.findUnique({ where: { lemma } })) {
-      throw conflict(`"${lemma}" is already in the collection`);
-    }
-    entry = { ...drafted, difficulty: Math.min(5, Math.max(1, drafted.difficulty)) };
   }
 
-  const wordId = await db.$transaction(async (tx) => {
-    const word = await tx.word.create({
-      data: {
-        lemma,
-        definition: entry.definition,
-        pronunciation: emptyToNull(entry.pronunciation),
-        partOfSpeech: emptyToNull(entry.partOfSpeech),
-        etymology: emptyToNull(entry.etymology),
-        relatedForms: entry.relatedForms ?? [],
-        synonyms: entry.synonyms ?? [],
-        antonyms: entry.antonyms ?? [],
-        examples: entry.examples ?? [],
-        difficulty: entry.difficulty ?? 3,
-        addedById: user.id,
-      },
-    });
-    await setMorphemes(tx, word.id, entry.morphemes ?? []);
-    if (body.encounter) await createEncounter(tx, user.id, word.id, body.encounter);
-    if (body.study) await tx.userWord.create({ data: { userId: user.id, wordId: word.id } });
-    await awardXp(tx, user.id, "WORD_ADDED", word.id);
-    return word.id;
+  await db.$transaction(async (tx) => {
+    if (body.encounter) await createEncounter(tx, user.id, wordId, body.encounter);
+    if (body.study) {
+      await tx.userWord.upsert({
+        where: { userId_wordId: { userId: user.id, wordId } },
+        update: {},
+        create: { userId: user.id, wordId },
+      });
+    }
+    await awardXp(tx, user.id, "WORD_ADDED", wordId);
   });
   await settle(user.id);
   return wordDetail(user, wordId);
@@ -276,24 +413,12 @@ export async function addEncounter(
 export async function studyWord(user: User, wordId: string) {
   const word = await db.word.findUnique({ where: { id: wordId } });
   if (!word) throw notFound("Word");
-  const mine = { userId_wordId: { userId: user.id, wordId } };
-  if (word.curriculumPosition !== null && !(await db.userWord.findUnique({ where: mine }))) {
-    // Curriculum words are taken in order, so only the next one can be begun.
-    const state = await curriculum(user);
-    if (state.next?.id !== wordId) {
-      throw conflict("This word comes later in the curriculum; words are studied in order");
-    }
-    if (!state.canStartNext) {
-      throw conflict(
-        `Finish the five sentences for a word in progress before starting another (limit ${MAX_CURRICULUM_IN_PROGRESS})`,
-      );
-    }
-  }
   await db.userWord.upsert({
-    where: mine,
+    where: { userId_wordId: { userId: user.id, wordId } },
     update: {},
     create: { userId: user.id, wordId },
   });
+  await enrichIfNeeded(wordId);
   return wordDetail(user, wordId);
 }
 
@@ -301,9 +426,6 @@ export async function studyWord(user: User, wordId: string) {
 export async function introduceWord(user: User, wordId: string, targetId: string) {
   const word = await db.word.findUnique({ where: { id: wordId } });
   if (!word) throw notFound("Word");
-  if (word.curriculumPosition !== null) {
-    throw conflict("Curriculum words reach everyone in order and cannot be introduced");
-  }
   if (targetId === user.id) throw conflict("Use the study endpoint to add a word for yourself");
   const target = await db.user.findUnique({ where: { id: targetId } });
   if (!target) throw notFound("Player");
@@ -323,104 +445,4 @@ export async function listUsers() {
   return { users: users.map(publicUser) };
 }
 
-// --- The shared curriculum --------------------------------------------------
-
-/** How many curriculum words a player may have unfinished before starting another. */
-export const MAX_CURRICULUM_IN_PROGRESS = 3;
-
-export async function curriculum(user: User) {
-  const [total, mine, users, studiedByUser] = await Promise.all([
-    db.word.count({ where: { curriculumPosition: { not: null } } }),
-    db.word.findMany({
-      where: {
-        curriculumPosition: { not: null },
-        userWords: { some: { userId: user.id } },
-      },
-      include: summaryInclude,
-      orderBy: { curriculumPosition: "asc" },
-    }),
-    db.user.findMany({ orderBy: { createdAt: "asc" } }),
-    db.userWord.groupBy({
-      by: ["userId"],
-      where: { studiedAt: { not: null }, word: { curriculumPosition: { not: null } } },
-      _count: true,
-    }),
-  ]);
-  // Everyone takes the words in the same order: the next one is the first not yet started.
-  const next = await db.word.findFirst({
-    where: { curriculumPosition: { not: null }, NOT: { userWords: { some: { userId: user.id } } } },
-    include: summaryInclude,
-    orderBy: { curriculumPosition: "asc" },
-  });
-  const summaries = mine.map((w) => serializeSummary(w, user.id));
-  const inProgress = summaries.filter((w) => w.myProgress?.stage === "STUDYING");
-  const studied = new Map(studiedByUser.map((row) => [row.userId, row._count]));
-  return {
-    total,
-    started: summaries.length,
-    studied: summaries.length - inProgress.length,
-    inProgress,
-    next: next && serializeSummary(next, user.id),
-    canStartNext: next !== null && inProgress.length < MAX_CURRICULUM_IN_PROGRESS,
-    maxInProgress: MAX_CURRICULUM_IN_PROGRESS,
-    players: users
-      .map((u) => ({ user: publicUser(u), isMe: u.id === user.id, studied: studied.get(u.id) ?? 0 }))
-      .sort((a, b) => b.studied - a.studied),
-  };
-}
-
-export type CurriculumEntry = {
-  lemma: string;
-  pronunciation: string;
-  partOfSpeech: string;
-  definition: string;
-  etymology: string;
-  /** [kind, form, meaning, origin] */
-  morphemes: [z.output<typeof MorphemeInput>["kind"], string, string, string][];
-  relatedForms: string[];
-  synonyms: string[];
-  antonyms: string[];
-  examples: string[];
-  difficulty: number;
-};
-
-/**
- * Load the curriculum: the list's order becomes every player's order. Safe to
- * re-run; existing words are updated in place and keep players' progress. A
- * word a player had already added is adopted into the curriculum.
- */
-export async function seedCurriculum(entries: CurriculumEntry[]): Promise<number> {
-  await db.$transaction(
-    async (tx) => {
-      // Clear positions first so a reordered list cannot collide with itself.
-      await tx.word.updateMany({
-        where: { curriculumPosition: { not: null } },
-        data: { curriculumPosition: null },
-      });
-      for (const [index, entry] of entries.entries()) {
-        const { morphemes, lemma, ...fields } = entry;
-        const data = { ...fields, curriculumPosition: index + 1 };
-        const word = await tx.word.upsert({
-          where: { lemma },
-          update: data,
-          create: { lemma, ...data },
-        });
-        await setMorphemes(
-          tx,
-          word.id,
-          morphemes.map(([kind, form, meaning, origin]) => ({ kind, form, meaning, origin })),
-        );
-      }
-    },
-    { timeout: 120_000 },
-  );
-  return entries.length;
-}
-
-export async function startNextCurriculumWord(user: User) {
-  const state = await curriculum(user);
-  if (!state.next) throw conflict("You have started every word in the curriculum");
-  return studyWord(user, state.next.id);
-}
-
-export { progressInclude };
+export { progressInclude, summaryInclude, publicUser, createEncounter };

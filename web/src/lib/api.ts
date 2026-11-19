@@ -17,7 +17,10 @@ export type ReviewResult = z.output<typeof c.ReviewResult>;
 export type Leaderboard = z.output<typeof c.Leaderboard>;
 export type LearningStage = z.output<typeof c.LearningStage>;
 export type PublicUser = z.output<typeof c.PublicUser>;
-export type Curriculum = z.output<typeof c.Curriculum>;
+export type CurriculumSummary = z.output<typeof c.CurriculumSummary>;
+export type CurriculumDetail = z.output<typeof c.CurriculumDetail>;
+export type CurriculumWord = z.output<typeof c.CurriculumWord>;
+export type SourceKind = z.output<typeof c.SourceKind>;
 export type Challenge = z.output<typeof c.Challenge>;
 export type Achievement = z.output<typeof c.Achievement>;
 export type Stats = z.output<typeof c.Stats>;
@@ -76,8 +79,14 @@ export const api = {
   updateWord: (id: string, body: z.input<typeof c.UpdateWordBody>) =>
     request<WordDetail>("PATCH", `/words/${id}`, body),
   listUsers: () => get<{ users: PublicUser[] }>("/users"),
-  curriculum: () => get<Curriculum>("/curriculum"),
-  startNextCurriculumWord: () => post<WordDetail>("/curriculum/next"),
+  curricula: () => get<{ curricula: CurriculumSummary[] }>("/curricula"),
+  curriculum: (id: string) => get<CurriculumDetail>(`/curricula/${id}`),
+  createCurriculum: (body: z.input<typeof c.CreateCurriculumBody>) =>
+    post<CurriculumDetail>("/curricula", body),
+  deleteCurriculum: (id: string) => request<void>("DELETE", `/curricula/${id}`),
+  startNextWord: (id: string) => post<WordDetail>(`/curricula/${id}/next`),
+  skipWord: (id: string, lemma: string) =>
+    post<CurriculumDetail>(`/curricula/${id}/skip`, { lemma }),
   challenges: () => get<{ challenges: Challenge[] }>("/challenges"),
   achievements: (userId?: string) =>
     get<{ achievements: Achievement[] }>(`/achievements${forUser(userId)}`),

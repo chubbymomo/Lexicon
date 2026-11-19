@@ -3,14 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
-import {
-  api,
-  type Challenge,
-  type Curriculum,
-  type Leaderboard,
-  type WordSummary,
-} from "@/lib/api";
+import { api, type Challenge, type Leaderboard, type WordSummary } from "@/lib/api";
 import { useResource } from "@/lib/use-resource";
+import { CurriculumCard, NewCurriculum } from "./curricula";
+import { useMe } from "./shell";
 import { Button, dueText, Field, Meter, Notice, Section, Stage, TextArea } from "./ui";
 
 function Standings({ board }: { board: Leaderboard }) {
@@ -66,86 +62,9 @@ function Challenges({ challenges }: { challenges: Challenge[] }) {
   );
 }
 
-function CurriculumPanel({ state, onChange }: { state: Curriculum; onChange: () => void }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function begin() {
-    setBusy(true);
-    setError(null);
-    try {
-      const word = await api.startNextCurriculumWord();
-      onChange();
-      router.push(`/words/${word.id}`);
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(false);
-    }
-  }
-
-  if (state.total === 0) {
-    return <p className="text-soft italic">No curriculum has been loaded on this server.</p>;
-  }
-
-  return (
-    <div className="space-y-4">
-      <p className="text-soft">
-        A fixed list of {state.total} words that everyone studies in the same order.
-      </p>
-      <ul className="space-y-1">
-        {state.players.map((p) => (
-          <li key={p.user.id} className="grid grid-cols-[7rem_1fr] items-center gap-3">
-            <span className="truncate">
-              {p.user.displayName}
-              {p.isMe && <span className="label ml-2">you</span>}
-            </span>
-            <Meter value={p.studied} max={state.total} label={`${p.studied} of ${state.total}`} />
-          </li>
-        ))}
-      </ul>
-
-      {state.inProgress.length > 0 && (
-        <p>
-          <span className="label mr-2">In progress</span>
-          {state.inProgress.map((word, i) => (
-            <span key={word.id}>
-              {i > 0 && ", "}
-              <Link href={`/words/${word.id}`} className="text-accent underline">
-                {word.lemma}
-              </Link>{" "}
-              <span className="text-soft">({word.myProgress?.acceptedSentences ?? 0}/5)</span>
-            </span>
-          ))}
-        </p>
-      )}
-
-      {state.next ? (
-        <div className="rounded-sm border border-rule bg-raised p-4">
-          <p className="label">Next · word {state.next.curriculumPosition}</p>
-          <p className="font-display text-3xl font-semibold">{state.next.lemma}</p>
-          {state.canStartNext ? (
-            <Button className="mt-2" onClick={begin} disabled={busy}>
-              {busy ? "Opening…" : "Begin this word"}
-            </Button>
-          ) : (
-            <p className="mt-1 text-soft">
-              Finish the five sentences for a word in progress first; up to {state.maxInProgress}{" "}
-              can be under way at once.
-            </p>
-          )}
-        </div>
-      ) : (
-        <Notice tone="good">You have started every word in the curriculum.</Notice>
-      )}
-      {error && <Notice>{error}</Notice>}
-    </div>
-  );
-}
-
 function AddWord({ tutorAvailable }: { tutorAvailable: boolean }) {
   const router = useRouter();
-  const [manual, setManual] = useState(!tutorAvailable);
+  const [manual, setManual] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -165,6 +84,8 @@ function AddWord({ tutorAvailable }: { tutorAvailable: boolean }) {
       router.push(`/words/${word.id}`);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      // Pages keep their state when you return to them; never leave this set.
       setBusy(false);
     }
   }
@@ -176,7 +97,7 @@ function AddWord({ tutorAvailable }: { tutorAvailable: boolean }) {
           <Field label="A new word" name="lemma" required maxLength={60} autoComplete="off" />
         </div>
         <Button type="submit" disabled={busy}>
-          {busy ? (manual ? "Adding…" : "Consulting the tutor…") : "Add"}
+          {busy ? "Adding…" : "Add"}
         </Button>
       </div>
       {manual && <TextArea label="Definition" name="definition" required rows={2} maxLength={1000} />}
@@ -187,14 +108,16 @@ function AddWord({ tutorAvailable }: { tutorAvailable: boolean }) {
           <TextArea label="The passage" name="passage" rows={2} maxLength={2000} />
         </div>
       </details>
-      {tutorAvailable ? (
-        <label className="flex items-center gap-2 text-soft">
-          <input type="checkbox" checked={manual} onChange={(e) => setManual(e.target.checked)} />
-          Write the definition myself
-        </label>
-      ) : (
+      <label className="flex items-center gap-2 text-soft">
+        <input type="checkbox" checked={manual} onChange={(e) => setManual(e.target.checked)} />
+        Write the definition myself
+      </label>
+      {!manual && (
         <p className="text-sm text-soft">
-          The AI tutor is not configured, so entries are written by hand for now.
+          The entry comes from the dictionary
+          {tutorAvailable
+            ? "; the tutor fills in its history and drafts words the dictionary lacks."
+            : ". Words it lacks need a definition written by hand."}
         </p>
       )}
       {error && <Notice>{error}</Notice>}
@@ -223,7 +146,7 @@ function WordRow({ word }: { word: WordSummary }) {
         <p className="text-sm text-soft">
           {progress &&
             (progress.stage === "STUDYING"
-              ? `${progress.acceptedSentences} of 5 sentences`
+              ? `${progress.acceptedSentences} of ${progress.sentencesRequired} sentences`
               : dueText(progress.due))}
           {progress && others && " · "}
           {others && `also studied by ${others}`}
@@ -242,6 +165,7 @@ const filters: { id: Filter; label: string }[] = [
 ];
 
 function Collection({ words }: { words: WordSummary[] }) {
+  const me = useMe();
   const [filter, setFilter] = useState<Filter>("mine");
   const [query, setQuery] = useState("");
 
@@ -249,13 +173,14 @@ function Collection({ words }: { words: WordSummary[] }) {
   const shown = words.filter((w) => {
     if (!w.lemma.startsWith(prefix)) return false;
     if (filter === "mine") return w.myProgress !== null;
-    // Discover: words other players added that you have not begun. Curriculum
-    // words are left out; they arrive in order.
-    if (filter === "discover") return w.myProgress === null && w.curriculumPosition === null;
+    // Discover: words other players added themselves that you have not begun.
+    if (filter === "discover") {
+      return w.myProgress === null && w.addedBy !== null && w.addedBy.id !== me.id;
+    }
     return true;
   });
   const empty: Record<Filter, string> = {
-    mine: "Nothing on your list yet. Begin the curriculum or add a word of your own.",
+    mine: "Nothing on your list yet. Begin a word from a curriculum or add one of your own.",
     discover: "Nothing new from the others just now.",
     all: "Nothing matches.",
   };
@@ -297,7 +222,7 @@ export function Library() {
   const words = useResource(api.listWords);
   const board = useResource(api.leaderboard);
   const meta = useResource(api.meta);
-  const curriculum = useResource(api.curriculum);
+  const curricula = useResource(api.curricula);
   const challenges = useResource(api.challenges);
 
   return (
@@ -310,9 +235,25 @@ export function Library() {
         </Section>
       )}
 
-      <Section title="The curriculum">
-        {curriculum.error && <Notice>{curriculum.error.message}</Notice>}
-        {curriculum.data && <CurriculumPanel state={curriculum.data} onChange={curriculum.reload} />}
+      <Section title="Curricula">
+        {curricula.error && <Notice>{curricula.error.message}</Notice>}
+        {curricula.data && (
+          <div className="space-y-4">
+            <p className="text-soft">
+              Everyone works through each list in the same order. Pass over words you already
+              know; they will not come back for review.
+            </p>
+            {curricula.data.curricula.map((c) => (
+              <CurriculumCard key={c.id} state={c} onChange={curricula.reload} />
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section title="A curriculum from a video, series or book">
+        {meta.data && (
+          <NewCurriculum tutorAvailable={meta.data.tutorAvailable} onCreated={curricula.reload} />
+        )}
       </Section>
 
       <Section title="Add a word of your own">

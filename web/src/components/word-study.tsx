@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { api, type Sentence, type WordDetail } from "@/lib/api";
 import { useResource } from "@/lib/use-resource";
+import { KeepGoing } from "./curricula";
 import { useMe } from "./shell";
 import { Button, dueText, Field, Notice, Section, Stage, TextArea } from "./ui";
 
@@ -14,8 +15,10 @@ function Entry({ word }: { word: WordDetail }) {
   return (
     <>
       <header>
-        {word.curriculumPosition !== null && (
-          <p className="label">Curriculum · word {word.curriculumPosition}</p>
+        {word.curricula.length > 0 && (
+          <p className="label">
+            {word.curricula.map((c) => `${c.title} · word ${c.position}`).join("  ·  ")}
+          </p>
         )}
         <h1 className="font-display text-6xl font-semibold leading-tight">{word.lemma}</h1>
         <p className="text-soft">
@@ -236,6 +239,8 @@ function Encounters({ word, onChange }: { word: WordDetail; onChange: () => void
   );
 }
 
+const numberWords: Record<number, string> = { 1: "one", 2: "two", 3: "three", 4: "four", 5: "five" };
+
 const lines = (text: string) =>
   text
     .split("\n")
@@ -318,7 +323,7 @@ function Others({ word, onChange }: { word: WordDetail; onChange: (action: () =>
           {o.user.displayName}: <Stage stage={o.stage} />
         </p>
       ))}
-      {word.curriculumPosition === null && candidates.length > 0 && (
+      {candidates.length > 0 && (
         <p>
           Introduce this word to{" "}
           {candidates.map((u, i) => (
@@ -367,9 +372,7 @@ export function WordStudy() {
         {!progress ? (
           <div className="space-y-3">
             <p className="text-soft">
-              {data.curriculumPosition === null
-                ? "This word is in the collection but not yet on your list."
-                : `This is word ${data.curriculumPosition} of the curriculum. You can begin it when it is your next word.`}
+              This word is in the collection but not yet on your list.
             </p>
             <Button onClick={() => act(() => api.studyWord(data.id))}>Begin studying</Button>
           </div>
@@ -379,18 +382,23 @@ export function WordStudy() {
               <Stage stage={progress.stage} />
               <span className="text-soft">
                 {progress.stage === "STUDYING"
-                  ? `${progress.acceptedSentences} of 5 sentences accepted`
+                  ? `${progress.acceptedSentences} of ${progress.sentencesRequired} sentences accepted`
                   : dueText(progress.due)}
                 {progress.introducedBy && ` · introduced by ${progress.introducedBy.displayName}`}
               </span>
             </p>
             {progress.stage === "STUDYING" && (
               <p className="mt-2 text-soft">
-                Write five original sentences. Each should make the meaning of the word plain from
-                its context.
+                Write {numberWords[progress.sentencesRequired] ?? progress.sentencesRequired}{" "}
+                original sentences. Each should make the meaning of the word plain from its context.
               </p>
             )}
-            <ol>
+            {progress.stage === "KNOWN" && (
+              <p className="mt-2 text-soft">
+                You marked this word as already known, so it is not reviewed.
+              </p>
+            )}
+            <ol hidden={progress.stage === "KNOWN"}>
               {data.sentences.map((slot) => (
                 <SentenceSlot
                   key={`${slot.slot}:${slot.attempts}`}
@@ -404,6 +412,12 @@ export function WordStudy() {
         )}
         <Others word={data} onChange={act} />
       </Section>
+
+      {progress && progress.stage !== "STUDYING" && (
+        <Section title="Keep going">
+          <KeepGoing />
+        </Section>
+      )}
 
       <Encounters word={data} onChange={word.reload} />
       <EditEntry word={data} onSaved={word.set} />

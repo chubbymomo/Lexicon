@@ -1,19 +1,32 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- JSON bodies are checked by assertions */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/server/db";
-import type { DraftedEntry, SentenceEvaluation } from "@/server/services/tutor";
+import { loadDictionary, type DictionaryData } from "@/server/services/dictionary";
+import type {
+  DraftedEntry,
+  EnrichedEntry,
+  SentenceEvaluation,
+  suggestSourceWords,
+} from "@/server/services/tutor";
 import { call, resetDatabase } from "./helpers";
 
 // The tutor is the only external dependency; tests script its answers.
 const tutor = vi.hoisted(() => ({
+  available: vi.fn(() => true),
   draft: vi.fn<(lemma: string) => Promise<DraftedEntry>>(),
   evaluate: vi.fn<(input: { sentence: string }) => Promise<SentenceEvaluation>>(),
+  enrich: vi.fn<(input: { lemma: string }) => Promise<EnrichedEntry>>(),
+  choose: vi.fn<(input: { candidates: { lemma: string }[] }) => Promise<string[]>>(),
+  suggest: vi.fn<typeof suggestSourceWords>(),
 }));
 vi.mock("@/server/services/tutor", async (original) => ({
   ...(await original<typeof import("@/server/services/tutor")>()),
-  tutorAvailable: () => true,
+  tutorAvailable: tutor.available,
   draftEntry: tutor.draft,
   evaluateSentence: tutor.evaluate,
+  enrichEntry: tutor.enrich,
+  chooseSourceWords: tutor.choose,
+  suggestSourceWords: tutor.suggest,
 }));
 
 import { POST as login } from "@/app/api/v1/auth/login/route";
@@ -22,18 +35,19 @@ import { POST as register } from "@/app/api/v1/auth/register/route";
 import { GET as leaderboard } from "@/app/api/v1/leaderboard/route";
 import { GET as achievements } from "@/app/api/v1/achievements/route";
 import { GET as challenges } from "@/app/api/v1/challenges/route";
-import { POST as nextCurriculumWord } from "@/app/api/v1/curriculum/next/route";
-import { GET as curriculum } from "@/app/api/v1/curriculum/route";
+import { POST as nextWord } from "@/app/api/v1/curricula/[id]/next/route";
+import { DELETE as deleteCurriculum, GET as curriculum } from "@/app/api/v1/curricula/[id]/route";
+import { POST as skipWord } from "@/app/api/v1/curricula/[id]/skip/route";
+import { POST as createCurriculum, GET as listCurricula } from "@/app/api/v1/curricula/route";
 import { GET as me } from "@/app/api/v1/me/route";
 import { GET as meta } from "@/app/api/v1/meta/route";
 import { GET as stats } from "@/app/api/v1/stats/route";
 import { GET as listUsers } from "@/app/api/v1/users/route";
-import { seedCurriculum, type CurriculumEntry } from "@/server/services/words";
+import { promoteCompletedStudies } from "@/server/services/study";
 import { GET as dueReviews } from "@/app/api/v1/reviews/due/route";
 import { POST as submitReview } from "@/app/api/v1/reviews/route";
 import { POST as introduce } from "@/app/api/v1/words/[id]/introduce/route";
 import { GET as getWord } from "@/app/api/v1/words/[id]/route";
-import { POST as study } from "@/app/api/v1/words/[id]/study/route";
 import { POST as submitSentence } from "@/app/api/v1/words/[id]/sentences/route";
 import { GET as listWords, POST as createWord } from "@/app/api/v1/words/route";
 
@@ -93,7 +107,7 @@ const manualWord = {
 async function completeStudy(token: string, wordId: string) {
   tutor.evaluate.mockResolvedValue(good);
   let last;
-  for (let slot = 1; slot <= 5; slot++) {
+  for (let slot = 1; slot <= 3; slot++) {
     last = await call(submitSentence, {
       token,
       params: { id: wordId },
@@ -105,8 +119,9 @@ async function completeStudy(token: string, wordId: string) {
 
 beforeEach(async () => {
   await resetDatabase();
-  tutor.draft.mockReset();
-  tutor.evaluate.mockReset();
+  for (const mock of Object.values(tutor)) mock.mockReset();
+  tutor.available.mockReturnValue(true);
+  tutor.enrich.mockRejectedValue(new Error("not scripted"));
 });
 
 describe("accounts", () => {
@@ -184,7 +199,8 @@ describe("words", () => {
     expect(created.status).toBe(200);
     expect(created.data.lemma).toBe("ephemeral");
     expect(created.data.myProgress.stage).toBe("STUDYING");
-    expect(created.data.sentences).toHaveLength(5);
+    expect(created.data.sentences).toHaveLength(3);
+    expect(created.data.myProgress.sentencesRequired).toBe(3);
     expect(tutor.draft).not.toHaveBeenCalled();
 
     const duplicate = await call(createWord, { token, body: manualWord });
@@ -285,7 +301,7 @@ describe("five sentences", () => {
 
     const done = await completeStudy(token, word.id);
     expect(done.data.progress.stage).toBe("REVIEWING");
-    expect(done.data.progress.acceptedSentences).toBe(5);
+    expect(done.data.progress.acceptedSentences).toBe(3);
     expect(done.data.xpAwarded).toBe(24); // sentence 4 + word studied 20
     expect(new Date(done.data.progress.due).getTime()).toBeGreaterThan(Date.now() + 86_000_000);
 
@@ -444,8 +460,8 @@ describe("leaderboard", () => {
     const [first, second] = data.entries;
     expect(first).toMatchObject({
       isMe: false,
-      xpTotal: 55, // word added 5 + five sentences 20 + word studied 20 + daily challenge 10
-      xpThisWeek: 55,
+      xpTotal: 47, // word added 5 + three sentences 12 + word studied 20 + daily challenge 10
+      xpThisWeek: 47,
       streakDays: 1,
       wordsStudied: 1,
       wordsMastered: 0,
@@ -454,102 +470,326 @@ describe("leaderboard", () => {
   });
 });
 
-describe("curriculum", () => {
-  const entry = (lemma: string): CurriculumEntry => ({
-    lemma,
-    pronunciation: "",
-    partOfSpeech: "adjective",
-    definition: `Definition of ${lemma}.`,
-    etymology: "",
-    morphemes: [["ROOT", "luc", "light", "Latin"]],
-    relatedForms: [],
-    synonyms: [],
-    antonyms: [],
-    examples: [`An example with ${lemma} in it.`],
-    difficulty: 2,
-  });
-  const list = ["lucid", "candid", "stoic", "laconic", "sanguine"].map(entry);
+const dictionary: DictionaryData = {
+  format: 1,
+  entries: [
+    ["lucid", "adjective", "Clearly expressed.", ["clear"], [], ["A lucid account."], 3.0],
+    ["candid", "adjective", "Frank and open.", ["frank"], [], ["A candid reply."], 3.4],
+    ["stoic", "adjective", "Enduring without complaint.", [], [], [], 2.9],
+    ["laconic", "adjective", "Using few words.", [], [], [], 2.5],
+    ["sanguine", "adjective", "Optimistic.", [], [], [], 2.6],
+    ["run", "verb", "Move swiftly on foot.", [], [], [], 5.5],
+    ["obfuscate", "verb", "Make obscure.", [], [], [], 2.2],
+    ["ephemeral", "adjective", "Lasting a short time.", [], [], [], 2.9],
+    ["ubiquitous", "adjective", "Found everywhere.", [], [], [], 3.4],
+    ["perfunctory", "adjective", "Done without care.", [], [], [], 2.4],
+  ],
+  forms: [["ran", "run"]],
+  core: ["lucid", "candid", "stoic", "laconic", "sanguine"],
+};
+
+const enriched: EnrichedEntry = {
+  pronunciation: "/ˈluːsɪd/",
+  etymology: "From Latin lucidus, 'bright'.",
+  morphemes: [{ kind: "ROOT", form: "luc", meaning: "light", origin: "Latin" }],
+  relatedForms: ["lucidity (noun)"],
+  examples: ["Her lucid notes made the method easy to follow."],
+  difficulty: 2,
+};
+
+const core = { id: "core" };
+
+describe("the core curriculum", () => {
+  beforeEach(() => loadDictionary(dictionary));
 
   it("gives every player the same words in the same order", async () => {
     const ada = await signUp("ada");
     const grace = await signUp("grace");
-    await seedCurriculum(list);
+
+    // Nobody has begun it yet, so it is not in the collection.
+    expect((await call(curriculum, { token: ada, params: core })).data.next.wordId).toBeNull();
+    const list = await call(listCurricula, { token: ada });
+    expect(list.data.curricula).toHaveLength(1);
+    expect(list.data.curricula[0]).toMatchObject({ id: "core", kind: "CORE", total: 5 });
 
     for (const token of [ada, grace]) {
-      const state = await call(curriculum, { token });
-      expect(state.data).toMatchObject({ total: 5, started: 0, studied: 0, canStartNext: true });
-      expect(state.data.next.lemma).toBe("lucid");
-      const first = await call(nextCurriculumWord, { token, method: "POST" });
-      expect(first.data.lemma).toBe("lucid");
-      expect(first.data.curriculumPosition).toBe(1);
-      expect(first.data.addedBy).toBeNull();
-      const second = await call(nextCurriculumWord, { token, method: "POST" });
+      const state = await call(curriculum, { token, params: core });
+      expect(state.data).toMatchObject({ studied: 0, known: 0, canStartNext: true });
+      expect(state.data.next).toMatchObject({ lemma: "lucid", position: 1 });
+      expect(state.data.upcoming.map((w: any) => w.lemma)).toEqual(dictionary.core);
+
+      const first = await call(nextWord, { token, params: core, method: "POST" });
+      expect(first.data).toMatchObject({ lemma: "lucid", addedBy: null });
+      expect(first.data.curricula).toEqual([
+        { id: "core", title: "The core curriculum", position: 1 },
+      ]);
+      expect(first.data.myProgress.stage).toBe("STUDYING");
+      const second = await call(nextWord, { token, params: core, method: "POST" });
       expect(second.data.lemma).toBe("candid");
     }
+    // The word joined the collection once, from the dictionary.
+    expect(await db.word.count()).toBe(2);
+  });
+
+  it("has the tutor fill in the entry once, for everyone", async () => {
+    const ada = await signUp("ada");
+    const grace = await signUp("grace");
+    tutor.enrich.mockResolvedValue(enriched);
+
+    const { data } = await call(nextWord, { token: ada, params: core, method: "POST" });
+    expect(data.etymology).toBe(enriched.etymology);
+    expect(data.pronunciation).toBe(enriched.pronunciation);
+    expect(data.morphemes.map((m: any) => m.form)).toEqual(["luc"]);
+    expect(data.examples).toEqual(["A lucid account.", enriched.examples[0]]);
+
+    await call(nextWord, { token: grace, params: core, method: "POST" });
+    expect(tutor.enrich).toHaveBeenCalledTimes(1);
+  });
+
+  it("still begins a word when the tutor cannot fill it in", async () => {
+    const token = await signUp("ada");
+    const { status, data } = await call(nextWord, { token, params: core, method: "POST" });
+    expect(status).toBe(200);
+    expect(data.definition).toBe("Clearly expressed.");
+    expect(data.etymology).toBeNull();
   });
 
   it("holds back new words until those in progress are finished", async () => {
     const token = await signUp("ada");
-    await seedCurriculum(list);
-    for (let i = 0; i < 3; i++) await call(nextCurriculumWord, { token, method: "POST" });
+    for (let i = 0; i < 3; i++) await call(nextWord, { token, params: core, method: "POST" });
 
-    const blocked = await call(curriculum, { token });
+    const blocked = await call(curriculum, { token, params: core });
     expect(blocked.data.canStartNext).toBe(false);
     expect(blocked.data.inProgress.map((w: any) => w.lemma)).toEqual(["lucid", "candid", "stoic"]);
-    expect((await call(nextCurriculumWord, { token, method: "POST" })).status).toBe(409);
+    expect((await call(nextWord, { token, params: core, method: "POST" })).status).toBe(409);
 
     await completeStudy(token, blocked.data.inProgress[0].id);
-    const freed = await call(curriculum, { token });
+    const freed = await call(curriculum, { token, params: core });
     expect(freed.data).toMatchObject({ studied: 1, canStartNext: true });
     expect(freed.data.next.lemma).toBe("laconic");
     expect(freed.data.players).toEqual([
-      { user: expect.objectContaining({ displayName: "ada" }), isMe: true, studied: 1 },
+      { user: expect.objectContaining({ displayName: "ada" }), isMe: true, studied: 1, known: 0 },
     ]);
   });
 
-  it("can be reloaded in a new order without losing progress", async () => {
+  it("lets a player pass over a word they already know", async () => {
     const token = await signUp("ada");
-    await seedCurriculum(list);
-    const { data: word } = await call(nextCurriculumWord, { token, method: "POST" });
-    await completeStudy(token, word.id);
+    const skipped = await call(skipWord, { token, params: core, body: { lemma: "lucid" } });
+    expect(skipped.data).toMatchObject({ known: 1, canStartNext: true });
+    expect(skipped.data.next.lemma).toBe("candid");
 
-    await seedCurriculum([...list].reverse());
-    const state = await call(curriculum, { token });
-    expect(state.data).toMatchObject({ total: 5, studied: 1 });
-    expect(state.data.next.lemma).toBe("sanguine");
-    expect(await db.word.count()).toBe(5);
+    // Only the current next word can be passed over.
+    const wrong = await call(skipWord, { token, params: core, body: { lemma: "stoic" } });
+    expect(wrong.status).toBe(409);
+
+    const mine = await call(listWords, { token, query: "?stage=KNOWN" });
+    expect(mine.data.words.map((w: any) => w.lemma)).toEqual(["lucid"]);
+    expect((await call(dueReviews, { token })).data.dueCount).toBe(0);
+    expect((await call(stats, { token })).data.stages.known).toBe(1);
   });
 
-  it("does not let a player skip ahead or be introduced to a later word", async () => {
-    const ada = await signUp("ada");
-    const grace = await signUp("grace");
-    await seedCurriculum(list);
-    const later = await db.word.findUniqueOrThrow({ where: { lemma: "stoic" } });
+  it("does not offer a word the player has already begun some other way", async () => {
+    const token = await signUp("ada");
+    await call(createWord, { token, body: { ...manualWord, lemma: "lucid" } });
+    const state = await call(curriculum, { token, params: core });
+    expect(state.data.next.lemma).toBe("candid");
+    expect(state.data.inProgress.map((w: any) => w.lemma)).toEqual(["lucid"]);
+  });
 
-    const skip = await call(study, { token: ada, method: "POST", params: { id: later.id } });
-    expect(skip.status).toBe(409);
-    const graceId = (await call(me, { token: grace })).data.id;
-    const push = await call(introduce, {
-      token: ada,
-      params: { id: later.id },
-      body: { userId: graceId },
-    });
-    expect(push.status).toBe(409);
+  it("keeps everyone's progress when the dictionary is reloaded in a new order", async () => {
+    const token = await signUp("ada");
+    const { data: word } = await call(nextWord, { token, params: core, method: "POST" });
+    await completeStudy(token, word.id);
 
-    // The next word in order can be begun from its own page.
-    const first = await db.word.findUniqueOrThrow({ where: { lemma: "lucid" } });
-    const ok = await call(study, { token: ada, method: "POST", params: { id: first.id } });
-    expect(ok.data.myProgress.stage).toBe("STUDYING");
+    await loadDictionary({ ...dictionary, core: [...dictionary.core].reverse() });
+    const state = await call(curriculum, { token, params: core });
+    expect(state.data).toMatchObject({ total: 5, studied: 1 });
+    expect(state.data.next.lemma).toBe("sanguine");
   });
 
   it("stops at the end of the list", async () => {
     const token = await signUp("ada");
-    await seedCurriculum(list.slice(0, 1));
-    await call(nextCurriculumWord, { token, method: "POST" });
-    const state = await call(curriculum, { token });
-    expect(state.data.next).toBeNull();
-    expect(state.data.canStartNext).toBe(false);
-    expect((await call(nextCurriculumWord, { token, method: "POST" })).status).toBe(409);
+    for (const lemma of dictionary.core) {
+      await call(skipWord, { token, params: core, body: { lemma } });
+    }
+    const state = await call(curriculum, { token, params: core });
+    expect(state.data).toMatchObject({ next: null, canStartNext: false, known: 5 });
+    expect((await call(nextWord, { token, params: core, method: "POST" })).status).toBe(409);
+  });
+});
+
+describe("adding words from the dictionary", () => {
+  beforeEach(() => loadDictionary(dictionary));
+
+  it("uses the dictionary entry, finding the dictionary form of the word", async () => {
+    const token = await signUp("ada");
+    tutor.enrich.mockResolvedValue({ ...enriched, etymology: "From Old English rinnan." });
+    const { data } = await call(createWord, { token, body: { lemma: "ran" } });
+    expect(data).toMatchObject({
+      lemma: "run",
+      definition: "Move swiftly on foot.",
+      etymology: "From Old English rinnan.",
+    });
+    expect(data.addedBy.displayName).toBe("ada");
+    expect(tutor.draft).not.toHaveBeenCalled();
+  });
+
+  it("asks the tutor to draft words the dictionary lacks", async () => {
+    const token = await signUp("ada");
+    tutor.draft.mockResolvedValueOnce({ ...draft, lemma: "benevolent" });
+    const { data } = await call(createWord, { token, body: { lemma: "benevolent" } });
+    expect(data.etymology).toContain("Latin");
+    expect(tutor.draft).toHaveBeenCalledOnce();
+  });
+});
+
+describe("curricula from sources", () => {
+  beforeEach(() => loadDictionary(dictionary));
+
+  const subtitles = `1
+00:00:01,000 --> 00:00:03,500
+<i>Lucid dreams are rare.</i>
+
+2
+00:00:04,000 --> 00:00:06,000
+They obfuscate everything, the cameras are ubiquitous.
+
+3
+00:00:07,000 --> 00:00:09,000
+Perfunctory checks, ephemeral alliances. We ran.
+
+4
+00:00:10,000 --> 00:00:12,000
+Ask Sanguine about it.`;
+
+  it("finds words in subtitles and keeps the tutor's choice in the order they appear", async () => {
+    const ada = await signUp("ada");
+    tutor.choose.mockResolvedValue(["ubiquitous", "ephemeral", "obfuscate", "nonsense"]);
+    const { status, data } = await call(createCurriculum, {
+      token: ada,
+      body: { title: "Night Shift, episode 1", sourceKind: "series", text: subtitles },
+    });
+    expect(status).toBe(200);
+    expect(data).toMatchObject({ kind: "SOURCE", total: 3, sourceKind: "series" });
+    expect(data.createdBy.displayName).toBe("ada");
+    expect(data.upcoming.map((w: any) => [w.lemma, w.context])).toEqual([
+      ["obfuscate", "They obfuscate everything, the cameras are ubiquitous."],
+      ["ubiquitous", "They obfuscate everything, the cameras are ubiquitous."],
+      ["ephemeral", "Perfunctory checks, ephemeral alliances."],
+    ]);
+
+    // The tutor saw uncommon dictionary words only: no names, no common words.
+    const offered = tutor.choose.mock.calls[0][0].candidates.map((c) => c.lemma);
+    expect(offered.sort()).toEqual(["ephemeral", "lucid", "obfuscate", "perfunctory", "ubiquitous"]);
+
+    // Beginning a word records the line it came from.
+    const begun = await call(nextWord, { token: ada, params: { id: data.id }, method: "POST" });
+    expect(begun.data.encounters).toEqual([
+      expect.objectContaining({
+        sourceTitle: "Night Shift, episode 1",
+        sourceKind: "series",
+        passage: "They obfuscate everything, the cameras are ubiquitous.",
+      }),
+    ]);
+    expect(begun.data.curricula.map((c: any) => c.title)).toEqual(["Night Shift, episode 1"]);
+  });
+
+  it("takes the rarest words when the tutor is not configured", async () => {
+    const ada = await signUp("ada");
+    tutor.available.mockReturnValue(false);
+    const { data } = await call(createCurriculum, {
+      token: ada,
+      body: { title: "Night Shift", sourceKind: "series", text: subtitles, wordCount: 5 },
+    });
+    // Every uncommon dictionary word, in the order they appear; never the name.
+    expect(data.upcoming.map((w: any) => w.lemma)).toEqual([
+      "lucid",
+      "obfuscate",
+      "ubiquitous",
+      "perfunctory",
+      "ephemeral",
+    ]);
+    expect(tutor.choose).not.toHaveBeenCalled();
+  });
+
+  it("asks the tutor for words when only a title is given", async () => {
+    const ada = await signUp("ada");
+    tutor.suggest.mockResolvedValue({
+      recognised: true,
+      words: [
+        { word: "obfuscated", context: "The firm hides its accounts." },
+        { word: "Laconic", context: "The detective's manner." },
+        { word: "flibbertigibbetish", context: "Not in the dictionary." },
+        { word: "stoic", context: "The widow at the funeral." },
+      ],
+    });
+    const { data } = await call(createCurriculum, {
+      token: ada,
+      body: { title: "Bleak House", sourceKind: "book" },
+    });
+    expect(data.upcoming.map((w: any) => w.lemma)).toEqual(["obfuscate", "laconic", "stoic"]);
+    expect(data.upcoming[0].context).toBe("The firm hides its accounts.");
+  });
+
+  it("says so when the tutor does not know the work, or is not configured", async () => {
+    const ada = await signUp("ada");
+    tutor.suggest.mockResolvedValue({ recognised: false, words: [] });
+    const unknown = await call(createCurriculum, {
+      token: ada,
+      body: { title: "My cousin's vlog", sourceKind: "video" },
+    });
+    expect(unknown.status).toBe(409);
+
+    tutor.available.mockReturnValue(false);
+    const noTutor = await call(createCurriculum, {
+      token: ada,
+      body: { title: "Bleak House", sourceKind: "book" },
+    });
+    expect(noTutor.status).toBe(503);
+    expect(await db.track.count({ where: { kind: "SOURCE" } })).toBe(0);
+  });
+
+  it("lets only its creator remove a curriculum, and never the core one", async () => {
+    const ada = await signUp("ada");
+    const grace = await signUp("grace");
+    tutor.choose.mockResolvedValue(["ubiquitous", "ephemeral", "obfuscate"]);
+    const { data } = await call(createCurriculum, {
+      token: ada,
+      body: { title: "Night Shift", sourceKind: "series", text: subtitles },
+    });
+    const params = { id: data.id };
+    expect((await call(deleteCurriculum, { token: grace, params, method: "DELETE" })).status).toBe(403);
+    expect((await call(deleteCurriculum, { token: ada, params: core, method: "DELETE" })).status).toBe(403);
+    expect((await call(deleteCurriculum, { token: ada, params, method: "DELETE" })).status).toBe(204);
+    expect((await call(curriculum, { token: ada, params })).status).toBe(404);
+  });
+});
+
+describe("fewer sentences per word", () => {
+  it("finishes the study of words that already have enough accepted sentences", async () => {
+    const token = await signUp("ada");
+    const { data: word } = await call(createWord, { token, body: manualWord });
+    const userWordId = word.myProgress.userWordId;
+    // Accepted under the old five-sentence rule, in slots 1, 2 and 4.
+    for (const slot of [1, 2, 4]) {
+      await db.sentence.create({
+        data: {
+          userWordId,
+          slot,
+          text: `Ephemeral sentence ${slot}.`,
+          verdict: "ACCEPTED",
+          grammarOk: true,
+          usageOk: true,
+          contextOk: true,
+          feedback: "Good.",
+        },
+      });
+    }
+    expect(await promoteCompletedStudies()).toBe(1);
+    const after = await db.userWord.findUniqueOrThrow({ where: { id: userWordId } });
+    expect(after.stage).toBe("REVIEWING");
+    expect(after.due).not.toBeNull();
+    expect(await promoteCompletedStudies()).toBe(0);
   });
 });
 
@@ -626,7 +866,7 @@ describe("stats", () => {
     });
 
     const { data } = await call(stats, { token: ada });
-    expect(data.stages).toEqual({ studying: 0, reviewing: 1, mastered: 0 });
+    expect(data.stages).toEqual({ studying: 0, reviewing: 1, mastered: 0, known: 0 });
     expect(data.recallRate).toBe(1);
     expect(data.weeks).toHaveLength(12);
     expect(data.weeks.at(-1)).toMatchObject({ studied: 1, mastered: 0 });

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- JSON bodies are checked by assertions */
 import { db } from "@/server/db";
+import { resetDictionaryCache } from "@/server/services/dictionary";
 
 type Handler = (
   request: Request,
@@ -39,6 +40,8 @@ export async function call<T = any>(
 
 export async function resetDatabase() {
   await db.$executeRawUnsafe(
-    `TRUNCATE "User", "Word", "Morpheme" RESTART IDENTITY CASCADE`,
+    `TRUNCATE "User", "Word", "Morpheme", "DictionaryEntry", "WordForm", "Track", "Setting"
+     RESTART IDENTITY CASCADE`,
   );
+  resetDictionaryCache();
 }
