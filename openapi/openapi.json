@@ -1045,6 +1045,120 @@
         ]
       }
     },
+    "/curricula/{id}/placement": {
+      "post": {
+        "operationId": "startPlacement",
+        "tags": [
+          "Curricula"
+        ],
+        "summary": "Begin a placement check",
+        "description": "A short multiple-choice test that finds where you should start in the core curriculum. It climbs through levels from common to rare words, asking two or three questions per level, and stops at the first level you do not pass. Beginning again discards a check in progress. 409 for curricula other than the core one.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlacementStep"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/curricula/{id}/placement/answer": {
+      "post": {
+        "operationId": "answerPlacement",
+        "tags": [
+          "Curricula"
+        ],
+        "summary": "Answer the current placement question",
+        "description": "Returns the next question, or the result. Finishing sets your starting point; words you have already begun keep their progress. 409 if `questionId` is not the current question.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlacementAnswerBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlacementStep"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/curricula/{id}/skip": {
       "post": {
         "operationId": "skipCurriculumWord",
@@ -1650,6 +1764,20 @@
             "maximum": 9007199254740991,
             "description": "Words you marked as already known."
           },
+          "startPosition": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Where you start in this curriculum. Words before it are passed over without being marked known. 1 unless the placement check moved it."
+          },
+          "placementAvailable": {
+            "type": "boolean",
+            "description": "Whether a placement check is offered (the core curriculum only)."
+          },
+          "placementTaken": {
+            "type": "boolean",
+            "description": "Whether you have finished a placement check."
+          },
           "inProgress": {
             "type": "array",
             "items": {
@@ -1697,13 +1825,27 @@
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
+                },
+                "startPosition": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Where the player starts, set by the placement check (1 if not taken)."
+                },
+                "progress": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Words behind the player: those before their starting point, plus those begun since. Use it for progress bars."
                 }
               },
               "required": [
                 "user",
                 "isMe",
                 "studied",
-                "known"
+                "known",
+                "startPosition",
+                "progress"
               ],
               "additionalProperties": false
             },
@@ -1728,6 +1870,9 @@
           "total",
           "studied",
           "known",
+          "startPosition",
+          "placementAvailable",
+          "placementTaken",
           "inProgress",
           "next",
           "canStartNext",
@@ -1821,6 +1966,20 @@
             "maximum": 9007199254740991,
             "description": "Words you marked as already known."
           },
+          "startPosition": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Where you start in this curriculum. Words before it are passed over without being marked known. 1 unless the placement check moved it."
+          },
+          "placementAvailable": {
+            "type": "boolean",
+            "description": "Whether a placement check is offered (the core curriculum only)."
+          },
+          "placementTaken": {
+            "type": "boolean",
+            "description": "Whether you have finished a placement check."
+          },
           "inProgress": {
             "type": "array",
             "items": {
@@ -1868,13 +2027,27 @@
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
+                },
+                "startPosition": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Where the player starts, set by the placement check (1 if not taken)."
+                },
+                "progress": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Words behind the player: those before their starting point, plus those begun since. Use it for progress bars."
                 }
               },
               "required": [
                 "user",
                 "isMe",
                 "studied",
-                "known"
+                "known",
+                "startPosition",
+                "progress"
               ],
               "additionalProperties": false
             },
@@ -1892,6 +2065,9 @@
           "total",
           "studied",
           "known",
+          "startPosition",
+          "placementAvailable",
+          "placementTaken",
           "inProgress",
           "next",
           "canStartNext",
@@ -2324,6 +2500,164 @@
           "ROOT",
           "SUFFIX"
         ]
+      },
+      "PlacementAnswerBody": {
+        "type": "object",
+        "properties": {
+          "questionId": {
+            "type": "string"
+          },
+          "choice": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The index of the chosen definition, or null for \"I don't know\"."
+          }
+        },
+        "required": [
+          "questionId",
+          "choice"
+        ]
+      },
+      "PlacementQuestion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Send back with the answer."
+          },
+          "number": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Which question this is, from 1."
+          },
+          "level": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "The level being tested, from 1 (most common words)."
+          },
+          "levels": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "word": {
+            "type": "string"
+          },
+          "partOfSpeech": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Four definitions; one is right."
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "level",
+          "levels",
+          "word",
+          "partOfSpeech",
+          "options"
+        ],
+        "additionalProperties": false
+      },
+      "PlacementResult": {
+        "type": "object",
+        "properties": {
+          "startPosition": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "startWord": {
+            "description": "The word at the starting point.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "levelsPassed": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "levels": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "asked": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "correct": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "startPosition",
+          "startWord",
+          "total",
+          "levelsPassed",
+          "levels",
+          "asked",
+          "correct"
+        ],
+        "additionalProperties": false
+      },
+      "PlacementStep": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlacementQuestion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The next question; null once finished."
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlacementResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the check is finished; your starting point is then saved."
+          }
+        },
+        "required": [
+          "question",
+          "result"
+        ],
+        "additionalProperties": false
       },
       "Progress": {
         "type": "object",

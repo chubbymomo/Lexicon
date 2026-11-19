@@ -38,6 +38,8 @@ import { GET as challenges } from "@/app/api/v1/challenges/route";
 import { POST as nextWord } from "@/app/api/v1/curricula/[id]/next/route";
 import { DELETE as deleteCurriculum, GET as curriculum } from "@/app/api/v1/curricula/[id]/route";
 import { POST as skipWord } from "@/app/api/v1/curricula/[id]/skip/route";
+import { POST as answerPlacement } from "@/app/api/v1/curricula/[id]/placement/answer/route";
+import { POST as startPlacement } from "@/app/api/v1/curricula/[id]/placement/route";
 import { POST as createCurriculum, GET as listCurricula } from "@/app/api/v1/curricula/route";
 import { GET as me } from "@/app/api/v1/me/route";
 import { GET as meta } from "@/app/api/v1/meta/route";
@@ -568,7 +570,14 @@ describe("the core curriculum", () => {
     expect(freed.data).toMatchObject({ studied: 1, canStartNext: true });
     expect(freed.data.next.lemma).toBe("laconic");
     expect(freed.data.players).toEqual([
-      { user: expect.objectContaining({ displayName: "ada" }), isMe: true, studied: 1, known: 0 },
+      {
+        user: expect.objectContaining({ displayName: "ada" }),
+        isMe: true,
+        studied: 1,
+        known: 0,
+        startPosition: 1,
+        progress: 3, // three words begun
+      },
     ]);
   });
 
@@ -883,5 +892,146 @@ describe("stats", () => {
     const seenByGrace = await call(stats, { token: grace, query: `?userId=${adaId}` });
     expect(seenByGrace.data.user.displayName).toBe("ada");
     expect((await call(stats, { token: grace, query: "?userId=nobody" })).status).toBe(404);
+  });
+});
+
+describe("the placement check", () => {
+  // 200 core words, so every level has words to ask about.
+  const words = Array.from({ length: 200 }, (_, i) => `word${String(i + 1).padStart(3, "0")}`);
+  const big: DictionaryData = {
+    format: 1,
+    entries: words.map((w, i) => [w, "adjective", `meaning number ${i + 1}`, [], [], [], 4 - i / 100]),
+    forms: [],
+    core: words,
+  };
+  // Where each level begins for 200 words.
+  const levels = [1, 5, 11, 19, 29, 43, 61, 85, 117, 157];
+
+  beforeEach(() => loadDictionary(big));
+
+  async function current(token: string) {
+    const userId = (await call(me, { token })).data.id;
+    const p = await db.placement.findUniqueOrThrow({
+      where: { userId_trackId: { userId, trackId: "core" } },
+    });
+    return (p.state as any).current as { id: string; answer: number; lemma: string };
+  }
+
+  /** Answer right for `knownLevels` levels, then "I don't know" until the check ends. */
+  async function takeCheck(token: string, knownLevels: number) {
+    let step = (await call(startPlacement, { token, params: core, method: "POST" })).data;
+    while (step.question) {
+      const { answer } = await current(token);
+      const know = step.question.level <= knownLevels;
+      step = (
+        await call(answerPlacement, {
+          token,
+          params: core,
+          body: { questionId: step.question.id, choice: know ? answer : null },
+        })
+      ).data;
+    }
+    return step.result;
+  }
+
+  it("asks multiple-choice questions without revealing the answer", async () => {
+    const token = await signUp("ada");
+    const { data } = await call(startPlacement, { token, params: core, method: "POST" });
+    expect(data.result).toBeNull();
+    expect(data.question).toMatchObject({ number: 1, level: 1, levels: 10, partOfSpeech: "adjective" });
+    expect(Object.keys(data.question).sort()).toEqual(
+      ["id", "level", "levels", "number", "options", "partOfSpeech", "word"].sort(),
+    );
+    expect(data.question.options).toHaveLength(4);
+    // The right definition is among the options, and the word comes from the first level.
+    const position = words.indexOf(data.question.word) + 1;
+    expect(position).toBeLessThan(levels[1]);
+    expect(data.question.options).toContain(`Meaning number ${position}`);
+  });
+
+  it("starts the player at the first level they do not pass", async () => {
+    const ada = await signUp("ada");
+    const grace = await signUp("grace");
+    const result = await takeCheck(ada, 3);
+    expect(result).toMatchObject({
+      startPosition: levels[3],
+      startWord: words[levels[3] - 1],
+      levelsPassed: 3,
+      levels: 10,
+      asked: 8, // two right in each of three levels, then two "I don't know"
+      correct: 6,
+      total: 200,
+    });
+
+    const state = await call(curriculum, { token: ada, params: core });
+    expect(state.data).toMatchObject({
+      startPosition: levels[3],
+      placementTaken: true,
+      placementAvailable: true,
+      studied: 0,
+      known: 0,
+    });
+    expect(state.data.next).toMatchObject({ lemma: words[levels[3] - 1], position: levels[3] });
+    const mine = state.data.players.find((p: any) => p.isMe);
+    expect(mine).toMatchObject({ startPosition: levels[3], progress: levels[3] - 1 });
+
+    // Beginning a word moves the player on from their starting point.
+    const begun = await call(nextWord, { token: ada, params: core, method: "POST" });
+    expect(begun.data.lemma).toBe(words[levels[3] - 1]);
+
+    // Nobody else is affected.
+    const others = await call(curriculum, { token: grace, params: core });
+    expect(others.data).toMatchObject({ startPosition: 1, placementTaken: false });
+    expect(others.data.next.lemma).toBe(words[0]);
+  });
+
+  it("starts among the rarest words when every level is passed", async () => {
+    const token = await signUp("ada");
+    const result = await takeCheck(token, 99);
+    expect(result).toMatchObject({ startPosition: levels[9], levelsPassed: 10, asked: 20 });
+  });
+
+  it("starts at the beginning when the first level is not passed", async () => {
+    const token = await signUp("ada");
+    const result = await takeCheck(token, 0);
+    expect(result).toMatchObject({ startPosition: 1, levelsPassed: 0, asked: 2 });
+  });
+
+  it("keeps words already begun, and can be taken again", async () => {
+    const token = await signUp("ada");
+    const { data: first } = await call(nextWord, { token, params: core, method: "POST" });
+    await takeCheck(token, 5);
+    let state = await call(curriculum, { token, params: core });
+    expect(state.data.inProgress.map((w: any) => w.lemma)).toEqual([first.lemma]);
+    expect(state.data.next.position).toBe(levels[5]);
+
+    await takeCheck(token, 1);
+    state = await call(curriculum, { token, params: core });
+    expect(state.data.next.position).toBe(levels[1]);
+  });
+
+  it("rejects stale answers, answers without a check, and other curricula", async () => {
+    const token = await signUp("ada");
+    const none = await call(answerPlacement, {
+      token,
+      params: core,
+      body: { questionId: "nope", choice: 0 },
+    });
+    expect(none.status).toBe(409);
+
+    const { data } = await call(startPlacement, { token, params: core, method: "POST" });
+    const body = { questionId: data.question.id, choice: null };
+    expect((await call(answerPlacement, { token, params: core, body })).status).toBe(200);
+    expect((await call(answerPlacement, { token, params: core, body })).status).toBe(409);
+
+    const source = await db.track.create({
+      data: {
+        kind: "SOURCE",
+        title: "Elsewhere",
+        items: { create: [{ position: 1, lemma: "word150" }] },
+      },
+    });
+    const other = await call(startPlacement, { token, params: { id: source.id }, method: "POST" });
+    expect(other.status).toBe(409);
   });
 });

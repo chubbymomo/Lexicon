@@ -21,6 +21,7 @@ export type CurriculumSummary = z.output<typeof c.CurriculumSummary>;
 export type CurriculumDetail = z.output<typeof c.CurriculumDetail>;
 export type CurriculumWord = z.output<typeof c.CurriculumWord>;
 export type SourceKind = z.output<typeof c.SourceKind>;
+export type PlacementStep = z.output<typeof c.PlacementStep>;
 export type Challenge = z.output<typeof c.Challenge>;
 export type Achievement = z.output<typeof c.Achievement>;
 export type Stats = z.output<typeof c.Stats>;
@@ -85,6 +86,9 @@ export const api = {
     post<CurriculumDetail>("/curricula", body),
   deleteCurriculum: (id: string) => request<void>("DELETE", `/curricula/${id}`),
   startNextWord: (id: string) => post<WordDetail>(`/curricula/${id}/next`),
+  startPlacement: (id: string) => post<PlacementStep>(`/curricula/${id}/placement`),
+  answerPlacement: (id: string, questionId: string, choice: number | null) =>
+    post<PlacementStep>(`/curricula/${id}/placement/answer`, { questionId, choice }),
   skipWord: (id: string, lemma: string) =>
     post<CurriculumDetail>(`/curricula/${id}/skip`, { lemma }),
   challenges: () => get<{ challenges: Challenge[] }>("/challenges"),

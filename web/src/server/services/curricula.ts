@@ -30,12 +30,23 @@ type TrackWithCreator = Track & { createdBy: { id: string; displayName: string }
 
 type ItemRow = { position: number; lemma: string; context: string | null };
 
+/** Where the player starts in a curriculum (1 unless a placement check moved it). */
+async function startOf(trackId: string, userId: string): Promise<number> {
+  const placement = await db.placement.findUnique({
+    where: { userId_trackId: { userId, trackId } },
+    select: { startPosition: true },
+  });
+  return placement?.startPosition ?? 1;
+}
+
 /** The player's next words in a curriculum: items they have not begun, in order. */
 async function upcoming(trackId: string, userId: string, limit: number) {
+  const start = await startOf(trackId, userId);
   const rows = await db.$queryRaw<ItemRow[]>`
     SELECT ti.position, ti.lemma, ti.context
     FROM "TrackItem" ti
     WHERE ti."trackId" = ${trackId}
+      AND ti.position >= ${start}
       AND NOT EXISTS (
         SELECT 1 FROM "UserWord" uw JOIN "Word" w ON w.id = uw."wordId"
         WHERE uw."userId" = ${userId} AND w.lemma = ti.lemma)
@@ -65,17 +76,20 @@ async function upcoming(trackId: string, userId: string, limit: number) {
 }
 
 async function summarize(track: TrackWithCreator, user: User) {
-  const [total, counts, inProgressIds, next] = await Promise.all([
+  const [total, counts, placements, inProgressIds, next] = await Promise.all([
     db.trackItem.count({ where: { trackId: track.id } }),
-    db.$queryRaw<{ userId: string; studied: bigint; known: bigint }[]>`
+    db.$queryRaw<{ userId: string; studied: bigint; known: bigint; beyond: bigint }[]>`
       SELECT uw."userId",
         count(*) FILTER (WHERE uw."studiedAt" IS NOT NULL) AS studied,
-        count(*) FILTER (WHERE uw.stage = 'KNOWN') AS known
+        count(*) FILTER (WHERE uw.stage = 'KNOWN') AS known,
+        count(*) FILTER (WHERE ti.position >= coalesce(p."startPosition", 1)) AS beyond
       FROM "TrackItem" ti
       JOIN "Word" w ON w.lemma = ti.lemma
       JOIN "UserWord" uw ON uw."wordId" = w.id
+      LEFT JOIN "Placement" p ON p."userId" = uw."userId" AND p."trackId" = ti."trackId"
       WHERE ti."trackId" = ${track.id}
       GROUP BY uw."userId"`,
+    db.placement.findMany({ where: { trackId: track.id, startPosition: { not: null } } }),
     db.$queryRaw<{ id: string }[]>`
       SELECT w.id
       FROM "TrackItem" ti
@@ -93,15 +107,22 @@ async function summarize(track: TrackWithCreator, user: User) {
     .map((w) => serializeSummary(w, user.id, curricula));
 
   const byUser = new Map(counts.map((c) => [c.userId, c]));
+  const startBy = new Map(placements.map((p) => [p.userId, p.startPosition!]));
   const users = await db.user.findMany({ orderBy: { createdAt: "asc" } });
   const players = users
-    .map((u) => ({
-      user: publicUser(u),
-      isMe: u.id === user.id,
-      studied: Number(byUser.get(u.id)?.studied ?? 0),
-      known: Number(byUser.get(u.id)?.known ?? 0),
-    }))
-    .sort((a, b) => b.studied + b.known - (a.studied + a.known));
+    .map((u) => {
+      const startPosition = startBy.get(u.id) ?? 1;
+      return {
+        user: publicUser(u),
+        isMe: u.id === user.id,
+        studied: Number(byUser.get(u.id)?.studied ?? 0),
+        known: Number(byUser.get(u.id)?.known ?? 0),
+        startPosition,
+        // Words behind the player: those before their starting point, and those begun since.
+        progress: Math.min(total, startPosition - 1 + Number(byUser.get(u.id)?.beyond ?? 0)),
+      };
+    })
+    .sort((a, b) => b.progress - a.progress);
   const mine = players.find((p) => p.isMe)!;
 
   return {
@@ -115,6 +136,9 @@ async function summarize(track: TrackWithCreator, user: User) {
     total,
     studied: mine.studied,
     known: mine.known,
+    startPosition: mine.startPosition,
+    placementAvailable: track.kind === "CORE",
+    placementTaken: startBy.has(user.id),
     inProgress,
     next: next[0] ?? null,
     canStartNext: next.length > 0 && inProgress.length < MAX_IN_PROGRESS,

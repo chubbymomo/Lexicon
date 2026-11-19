@@ -290,6 +290,14 @@ export const CurriculumSummary = z
     total: z.number().int().meta({ description: "Words in the curriculum." }),
     studied: z.number().int().meta({ description: "Words you finished studying." }),
     known: z.number().int().meta({ description: "Words you marked as already known." }),
+    startPosition: z.number().int().meta({
+      description:
+        "Where you start in this curriculum. Words before it are passed over without being marked known. 1 unless the placement check moved it.",
+    }),
+    placementAvailable: z.boolean().meta({
+      description: "Whether a placement check is offered (the core curriculum only).",
+    }),
+    placementTaken: z.boolean().meta({ description: "Whether you have finished a placement check." }),
     inProgress: z.array(WordSummary).meta({
       description: "Words from this curriculum you have begun but not finished.",
     }),
@@ -307,6 +315,13 @@ export const CurriculumSummary = z
           isMe: z.boolean(),
           studied: z.number().int(),
           known: z.number().int(),
+          startPosition: z.number().int().meta({
+            description: "Where the player starts, set by the placement check (1 if not taken).",
+          }),
+          progress: z.number().int().meta({
+            description:
+              "Words behind the player: those before their starting point, plus those begun since. Use it for progress bars.",
+          }),
         }),
       )
       .meta({ description: "How far every player has come through the same list." }),
@@ -337,6 +352,48 @@ export const CreateCurriculumBody = z
     wordCount: z.number().int().min(5).max(100).default(25),
   })
   .meta({ id: "CreateCurriculumBody" });
+
+export const PlacementQuestion = z
+  .object({
+    id: z.string().meta({ description: "Send back with the answer." }),
+    number: z.number().int().meta({ description: "Which question this is, from 1." }),
+    level: z.number().int().meta({ description: "The level being tested, from 1 (most common words)." }),
+    levels: z.number().int(),
+    word: z.string(),
+    partOfSpeech: z.string(),
+    options: z.array(z.string()).meta({ description: "Four definitions; one is right." }),
+  })
+  .meta({ id: "PlacementQuestion" });
+
+export const PlacementResult = z
+  .object({
+    startPosition: z.number().int(),
+    startWord: z.string().nullable().meta({ description: "The word at the starting point." }),
+    total: z.number().int(),
+    levelsPassed: z.number().int(),
+    levels: z.number().int(),
+    asked: z.number().int(),
+    correct: z.number().int(),
+  })
+  .meta({ id: "PlacementResult" });
+
+export const PlacementStep = z
+  .object({
+    question: PlacementQuestion.nullable().meta({ description: "The next question; null once finished." }),
+    result: PlacementResult.nullable().meta({
+      description: "Set when the check is finished; your starting point is then saved.",
+    }),
+  })
+  .meta({ id: "PlacementStep" });
+
+export const PlacementAnswerBody = z
+  .object({
+    questionId: z.string(),
+    choice: z.number().int().min(0).max(3).nullable().meta({
+      description: "The index of the chosen definition, or null for \"I don't know\".",
+    }),
+  })
+  .meta({ id: "PlacementAnswerBody" });
 
 export const SkipBody = z
   .object({
@@ -745,6 +802,27 @@ export const endpoints = {
       "Adds the word to the collection if needed (the tutor fills in its etymology, which can take a few seconds) and to your study list. 409 if `canStartNext` is false.",
     auth: true,
     response: WordDetail,
+  }),
+  startPlacement: endpoint({
+    method: "POST",
+    path: "/curricula/{id}/placement",
+    tag: "Curricula",
+    summary: "Begin a placement check",
+    description:
+      "A short multiple-choice test that finds where you should start in the core curriculum. It climbs through levels from common to rare words, asking two or three questions per level, and stops at the first level you do not pass. Beginning again discards a check in progress. 409 for curricula other than the core one.",
+    auth: true,
+    response: PlacementStep,
+  }),
+  answerPlacement: endpoint({
+    method: "POST",
+    path: "/curricula/{id}/placement/answer",
+    tag: "Curricula",
+    summary: "Answer the current placement question",
+    description:
+      "Returns the next question, or the result. Finishing sets your starting point; words you have already begun keep their progress. 409 if `questionId` is not the current question.",
+    auth: true,
+    body: PlacementAnswerBody,
+    response: PlacementStep,
   }),
   skipCurriculumWord: endpoint({
     method: "POST",

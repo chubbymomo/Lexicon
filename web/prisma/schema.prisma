@@ -27,6 +27,7 @@ model User {
   introduced  UserWord[]  @relation("introducedBy")
   achievements Achievement[]
   tracks       Track[]
+  placements   Placement[]
 }
 
 /// An API token. Only the SHA-256 of the token is stored.
@@ -319,8 +320,26 @@ model Track {
   createdById String?
   createdAt   DateTime  @default(now())
 
-  createdBy User?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  items     TrackItem[]
+  createdBy  User?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  items      TrackItem[]
+  placements Placement[]
+}
+
+/// Where a player starts in a curriculum, found by the placement check. Words
+/// before the starting point are passed over without being marked known.
+model Placement {
+  userId        String
+  trackId       String
+  /// 1-based position of the player's first word; null until a check is finished.
+  startPosition Int?
+  /// The check in progress, if any.
+  state         Json?
+  updatedAt     DateTime @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@id([userId, trackId])
 }
 
 model TrackItem {

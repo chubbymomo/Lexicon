@@ -62,6 +62,8 @@ A word joins the collection (the `Word` table) only when someone first begins it
 
 A curriculum is an ordered list. Every player takes it in the same order: their next word is the first they have not begun, at most three can be unfinished per curriculum, and a word they already know can be passed over (it is marked "known" and never reviewed). A word begun anywhere counts everywhere, so nobody is asked for the same word twice.
 
+The **placement check** (`/placement`, or `POST /api/v1/curricula/core/placement`) finds where a player should start in the core curriculum. It splits the list into ten levels, from common to rare (they begin at 0%, 2%, 5%, 9%, 14%, 21%, 30%, 42%, 58% and 78% of the way through), and asks multiple-choice questions: a word and four definitions, or "I don't know". Two right answers pass a level and two wrong ones end the check, so it takes two or three questions per level. The player starts at the beginning of the first level they do not pass. Words before that point are passed over, not marked known; words already begun keep their progress, and the check can be taken again at any time. The answers stay on the server.
+
 Players make further curricula from a source (`POST /api/v1/curricula`):
 
 - **With text** (subtitles in SRT or WebVTT, a transcript, or prose): subtitle markup is removed, every word is matched to its dictionary form ("ran" to "run"), names are left out, and the uncommon words are offered to the tutor, which chooses the best. They are studied in the order they come up, and each keeps the line it appeared in, which becomes a "met in reading" record when a player begins it. Without the tutor, the rarest words are taken.

@@ -58,7 +58,6 @@ export function CurriculumCard({
   const { begin, busy, error: beginError } = useBeginNext();
   const [skipping, setSkipping] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const done = (p: { studied: number; known: number }) => p.studied + p.known;
 
   async function skip(lemma: string) {
     setSkipping(true);
@@ -88,7 +87,7 @@ export function CurriculumCard({
       <header className="flex flex-wrap items-baseline justify-between gap-x-4">
         <h3 className="font-display text-2xl font-semibold">{state.title}</h3>
         <span className="label">
-          {kindLabel(state)} · {state.total} words
+          {kindLabel(state)} · {state.total.toLocaleString()} words
         </span>
       </header>
       {(state.description || state.createdBy) && (
@@ -106,10 +105,34 @@ export function CurriculumCard({
               {p.user.displayName}
               {p.isMe && <span className="label ml-2">you</span>}
             </span>
-            <Meter value={done(p)} max={state.total} label={`${done(p)} of ${state.total}`} />
+            <Meter
+              value={p.progress}
+              max={state.total}
+              label={`${p.progress.toLocaleString()} of ${state.total.toLocaleString()}`}
+            />
           </li>
         ))}
       </ul>
+
+      {state.placementAvailable &&
+        (!state.placementTaken && state.studied + state.known + state.inProgress.length < 25 ? (
+          <div className="mt-4 rounded-sm border border-accent/40 p-3">
+            <p>
+              The list starts with common words. A short check finds where yours stop being
+              familiar, so you can start there.
+            </p>
+            <Link href="/placement" className="label mt-1 inline-block text-accent hover:text-ink">
+              Find my starting point
+            </Link>
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-soft">
+            {state.startPosition > 1 && `You start at word ${state.startPosition.toLocaleString()}. `}
+            <Link href="/placement" className="text-accent underline">
+              {state.placementTaken ? "Take the placement check again" : "Find my starting point"}
+            </Link>
+          </p>
+        ))}
 
       {state.inProgress.length > 0 && (
         <p className="mt-3">
@@ -130,7 +153,7 @@ export function CurriculumCard({
 
       {state.next ? (
         <div className="mt-4 border-t border-rule pt-3">
-          <p className="label">Next · word {state.next.position}</p>
+          <p className="label">Next · word {state.next.position.toLocaleString()}</p>
           <p>
             <span className="font-display text-3xl font-semibold">{state.next.lemma}</span>
             {state.next.partOfSpeech && (
